@@ -232,7 +232,7 @@ export default function Home() {
               <p className="text-xs text-gray-600">
                 MIT licensed ·{' '}
                 <a
-                  href="https://github.com/nicekid1/exportdash.cam"
+                  href="https://github.com/nobig-deals/exportdash.cam"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-gray-500 hover:text-gray-400 underline underline-offset-2"
