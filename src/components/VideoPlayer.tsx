@@ -175,6 +175,9 @@ export function VideoPlayer({
     absoluteTime
   );
 
+  // Telemetry is available only when loaded without errors
+  const hasTelemetry = !error && !isLoading;
+
   // Map SEI data with event.json GPS fallback
   const mapSeiData = useMemo(() => {
     if (seiData?.latitude_deg && seiData?.longitude_deg) return seiData;
@@ -531,7 +534,7 @@ export function VideoPlayer({
           setShowMap(prev => !prev);
           break;
         case 't':
-          setShowTelemetry(prev => !prev);
+          if (hasTelemetry) setShowTelemetry(prev => !prev);
           break;
         case 'd':
           setShowDateTime(prev => !prev);
@@ -806,7 +809,7 @@ export function VideoPlayer({
             style={layout === 'pip' && videoAspectRatio ? { aspectRatio: `${videoAspectRatio}` } : undefined}
           >
             {/* Telemetry Overlay - Top Center */}
-            {showTelemetry && (
+            {showTelemetry && hasTelemetry && (
               <div className="absolute top-3 left-1/2 -translate-x-1/2 pointer-events-auto">
                 <TelemetryCard
                   seiData={seiData}
@@ -821,7 +824,7 @@ export function VideoPlayer({
             {/* Date/Time Overlay - Below Telemetry or Top Center */}
             {showDateTime && (
               <div className={`absolute left-1/2 -translate-x-1/2 pointer-events-none ${
-                showTelemetry ? 'top-[95px]' : 'top-3'
+                showTelemetry && hasTelemetry ? 'top-[95px]' : 'top-3'
               }`}>
                 <div className="px-2 py-1 rounded-md bg-black/50 backdrop-blur-sm text-white/90 text-xs font-medium">
                   {(() => {
@@ -1089,13 +1092,16 @@ export function VideoPlayer({
           {/* Overlay Toggles */}
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-gray-500 mr-1">Show:</span>
-            <Tooltip content="Telemetry (T)" position="top">
+            <Tooltip content={hasTelemetry ? "Telemetry (T)" : "No telemetry available"} position="top">
               <button
-                onClick={() => setShowTelemetry(prev => !prev)}
+                onClick={() => hasTelemetry && setShowTelemetry(prev => !prev)}
+                disabled={!hasTelemetry}
                 className={`p-1.5 rounded transition-all ${
-                  showTelemetry
-                    ? 'bg-green-600 text-white'
-                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  !hasTelemetry
+                    ? 'bg-red-900/50 text-red-400 cursor-not-allowed opacity-60'
+                    : showTelemetry
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
                 }`}
               >
                 <IconBolt size={16} />
