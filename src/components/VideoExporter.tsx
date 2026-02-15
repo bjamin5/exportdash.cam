@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { IconDownload, IconPlayerStop, IconLoader2, IconCheck } from '@tabler/icons-react';
 import { SeiData, SeiWithFrameIndex } from '@/lib/dashcam-mp4';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
-import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG } from '@/types/video';
+import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, FormatType, getFormatPreset } from '@/types/video';
 import { Tooltip } from './Tooltip';
 
 type LayoutType = 'single' | 'pip' | 'triple' | 'all';
@@ -23,6 +23,7 @@ interface VideoExporterProps {
   showMap?: boolean;
   layout?: LayoutType;
   layoutConfig?: LayoutCameraConfig;
+  format?: FormatType;
 }
 
 // Map tile cache
@@ -110,6 +111,7 @@ export function VideoExporter({
   showMap = true,
   layout = 'single',
   layoutConfig = DEFAULT_LAYOUT_CONFIG,
+  format = 'original',
 }: VideoExporterProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
@@ -613,6 +615,8 @@ export function VideoExporter({
       const srcHeight = tempVideo.videoHeight || 720;
 
       const maxDimension = 1920;
+      const formatPreset = getFormatPreset(format);
+      const isPortraitFormat = formatPreset.aspectRatio > 0 && formatPreset.aspectRatio < 1;
 
       // Determine export layout angles from config
       const tripleAngles = [...layoutConfig.triple.cameras];
@@ -623,7 +627,11 @@ export function VideoExporter({
       let width: number;
       let height: number;
 
-      if (layout === 'triple') {
+      if (format !== 'original' && formatPreset.exportWidth > 0) {
+        // Use format's target resolution
+        width = formatPreset.exportWidth;
+        height = formatPreset.exportHeight;
+      } else if (layout === 'triple') {
         // Load a side video to get its dimensions
         const pillarVideo = sequence.moments[0].videos.find(v => v.angle === tripleAngles[0]);
         let pillarW = srcWidth;
@@ -798,7 +806,90 @@ export function VideoExporter({
 
         setStatus(`Processing: ${formatDuration(absoluteTime - exportStart)} / ${formatDuration(exportDuration)}`);
 
-        if (layout === 'triple') {
+        if (isPortraitFormat) {
+          // Portrait format composition: main video at top, PiP cameras below
+          const needReload = currentLoadedClipIdx !== clipIdx || currentLoadedAngle !== frameAngle;
+          if (needReload) {
+            const video = moment.videos.find(v => v.angle === frameAngle) || moment.videos[0];
+            await loadVideo(video.file);
+            currentLoadedClipIdx = clipIdx;
+            currentLoadedAngle = video.angle;
+          }
+          await seekVideo(localTime);
+
+          // Load PiP videos
+          for (const angle of pipAngles) {
+            const ev = extraVideos[angle];
+            if (!ev) continue;
+            const video = moment.videos.find(v => v.angle === angle);
+            if (!video) continue;
+            if (ev.loadedClipIdx !== clipIdx) {
+              ev.blobUrl = await loadVideoInto(ev.el, video.file, ev.blobUrl);
+              ev.loadedClipIdx = clipIdx;
+            }
+            await seekVideoEl(ev.el, localTime);
+          }
+          await new Promise((r) => setTimeout(r, 10));
+
+          // Black background
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+
+          // Draw main video filling width at top
+          const mainSrcW = tempVideo.videoWidth || srcWidth;
+          const mainSrcH = tempVideo.videoHeight || srcHeight;
+          const mainScale = width / mainSrcW;
+          const mainDrawH = Math.floor(mainSrcH * mainScale);
+          const mainY = 10;
+          ctx.drawImage(tempVideo, 0, mainY, width, mainDrawH);
+
+          // Draw PiP cameras in a row below main video
+          const pipRowY = mainY + mainDrawH + 8;
+          const activePipAngles = pipAngles.filter(a => moment.videos.some(v => v.angle === a));
+          const showMapInPipRow = layoutConfig.pip.corners.includes('map') && showMap;
+          const pipCount = activePipAngles.length + (showMapInPipRow ? 1 : 0);
+
+          if (pipCount > 0) {
+            const pipGap = 6;
+            const pipMarginX = 12;
+            const totalGaps = (pipCount - 1) * pipGap + pipMarginX * 2;
+            const pipItemW = Math.floor((width - totalGaps) / pipCount);
+            let pipX = pipMarginX;
+
+            for (const angle of activePipAngles) {
+              const ev = extraVideos[angle];
+              if (ev?.el.videoWidth) {
+                const pipItemH = Math.floor(pipItemW * (ev.el.videoHeight / ev.el.videoWidth));
+                // Rounded rect clip
+                ctx.save();
+                ctx.beginPath();
+                ctx.roundRect(pipX, pipRowY, pipItemW, pipItemH, 6);
+                ctx.clip();
+                ctx.drawImage(ev.el, pipX, pipRowY, pipItemW, pipItemH);
+                ctx.restore();
+                // Border
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(pipX, pipRowY, pipItemW, pipItemH, 6);
+                ctx.stroke();
+              }
+              pipX += pipItemW + pipGap;
+            }
+
+            // Map in PiP row
+            if (showMapInPipRow) {
+              const rawPipSei = getSeiForTime(absoluteTime);
+              const pipMapSei = rawPipSei?.latitude_deg && rawPipSei?.longitude_deg
+                ? rawPipSei
+                : sequence.event?.est_lat && sequence.event?.est_lon
+                  ? { ...(rawPipSei || {}), latitude_deg: sequence.event.est_lat, longitude_deg: sequence.event.est_lon } as typeof rawPipSei
+                  : rawPipSei;
+              await drawMiniMap(ctx, pipMapSei, width, height, { x: pipX, y: pipRowY, size: pipItemW });
+            }
+          }
+
+        } else if (layout === 'triple') {
           // Load and seek all 3 angles
           const cellW = Math.floor(width / 3);
           const cellH = height;
@@ -955,17 +1046,22 @@ export function VideoExporter({
             : rawSeiData;
 
         // Draw overlays based on toggle states
+        // For portrait formats, overlays are drawn within the main video area
+        const overlayW = width;
+        const overlayH = isPortraitFormat
+          ? Math.floor((srcHeight / srcWidth) * width)
+          : height;
         if (showTelemetry) {
-          drawTelemetry(ctx, seiData, width, height, telemetryIcons);
+          drawTelemetry(ctx, seiData, overlayW, overlayH, telemetryIcons);
         }
         if (showDateTime) {
           const realTime = new Date(moment.timestamp.getTime() + localTime * 1000);
           const dynamicDate = realTime.toISOString().split('T')[0];
           const dynamicTime = realTime.toTimeString().split(' ')[0];
-          drawDateTime(ctx, width, height, dynamicDate, dynamicTime, showTelemetry);
+          drawDateTime(ctx, overlayW, overlayH, dynamicDate, dynamicTime, showTelemetry);
         }
-        if (showMap && !(layout === 'pip' && layoutConfig.pip.corners.includes('map'))) {
-          await drawMiniMap(ctx, seiData, width, height, layout === 'pip' ? 'top-right' : 'bottom-right');
+        if (showMap && !(isPortraitFormat && layoutConfig.pip.corners.includes('map')) && !(layout === 'pip' && layoutConfig.pip.corners.includes('map'))) {
+          await drawMiniMap(ctx, seiData, overlayW, overlayH, layout === 'pip' ? 'top-right' : 'bottom-right');
         }
 
         // Frame timestamp is relative to export start (0-based for exported video)
@@ -1029,7 +1125,7 @@ export function VideoExporter({
       }
       tempVideo.src = '';
     }
-  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig]);
+  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig, format]);
 
   const stopExport = useCallback(() => {
     abortRef.current = true;

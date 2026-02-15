@@ -174,6 +174,88 @@ export const ANGLE_COLORS: Record<string, string> = {
   right_pillar: '#EC4899',   // pink
 };
 
+/** Social media format presets for export */
+export type FormatType = 'original' | 'tiktok' | 'instagram' | 'twitter' | 'youtube-shorts';
+
+export interface SafeZone {
+  label: string;
+  /** Percentage positions (0-1 range) relative to container */
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+export interface FormatPreset {
+  id: FormatType;
+  label: string;
+  shortLabel: string;
+  aspectRatio: number;  // width / height, 0 = use source
+  exportWidth: number;  // 0 = use source
+  exportHeight: number;
+  safeZones: SafeZone[];
+}
+
+export const FORMAT_PRESETS: FormatPreset[] = [
+  {
+    id: 'original',
+    label: 'Original',
+    shortLabel: 'Orig',
+    aspectRatio: 0,
+    exportWidth: 0,
+    exportHeight: 0,
+    safeZones: [],
+  },
+  {
+    id: 'tiktok',
+    label: 'TikTok / Reels',
+    shortLabel: 'TikTok',
+    aspectRatio: 9 / 16,
+    exportWidth: 1080,
+    exportHeight: 1920,
+    safeZones: [
+      { label: 'Username & Caption', top: 0.7, left: 0.02, width: 0.7, height: 0.22 },
+      { label: 'Actions', top: 0.3, left: 0.85, width: 0.13, height: 0.55 },
+    ],
+  },
+  {
+    id: 'instagram',
+    label: 'Instagram Post',
+    shortLabel: 'Insta',
+    aspectRatio: 4 / 5,
+    exportWidth: 1080,
+    exportHeight: 1350,
+    safeZones: [
+      { label: 'Caption', top: 0.88, left: 0.02, width: 0.96, height: 0.1 },
+    ],
+  },
+  {
+    id: 'twitter',
+    label: 'X (Twitter)',
+    shortLabel: 'X',
+    aspectRatio: 16 / 9,
+    exportWidth: 1280,
+    exportHeight: 720,
+    safeZones: [],
+  },
+  {
+    id: 'youtube-shorts',
+    label: 'YouTube Shorts',
+    shortLabel: 'Shorts',
+    aspectRatio: 9 / 16,
+    exportWidth: 1080,
+    exportHeight: 1920,
+    safeZones: [
+      { label: 'Title & Channel', top: 0.78, left: 0.02, width: 0.78, height: 0.14 },
+      { label: 'Actions', top: 0.35, left: 0.87, width: 0.11, height: 0.45 },
+    ],
+  },
+];
+
+export function getFormatPreset(id: FormatType): FormatPreset {
+  return FORMAT_PRESETS.find(f => f.id === id) || FORMAT_PRESETS[0];
+}
+
 /** Parse camera angle from filename */
 export function parseAngle(filename: string): string | null {
   const lower = filename.toLowerCase();

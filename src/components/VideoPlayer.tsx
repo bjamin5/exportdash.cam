@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback, lazy, Suspense, ReactNode, useMemo } from 'react';
 import { useSeiData } from '@/hooks/useSeiData';
 import { TelemetryCard } from './TelemetryCard';
-import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig } from '@/types/video';
+import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset } from '@/types/video';
 import { findMomentForTime, toAbsoluteTime } from '@/lib/sequence-detector';
 import {
   IconArrowUp,
@@ -35,6 +35,11 @@ import {
   IconWand,
   IconClock,
   IconSettings2,
+  IconAspectRatio,
+  IconBrandTiktok,
+  IconBrandInstagram,
+  IconBrandX,
+  IconBrandYoutube,
 } from '@tabler/icons-react';
 import { VideoExporter } from './VideoExporter';
 import { LayoutConfigPopover } from './LayoutConfigPopover';
@@ -59,6 +64,14 @@ const ANGLE_ICONS: Record<string, ReactNode> = {
   right_repeater: <IconArrowRight size={14} />,
   left_pillar: <IconArrowUpLeft size={14} />,
   right_pillar: <IconArrowUpRight size={14} />,
+};
+
+const FORMAT_ICONS: Record<string, ReactNode> = {
+  original: <IconAspectRatio size={14} />,
+  tiktok: <IconBrandTiktok size={14} />,
+  instagram: <IconBrandInstagram size={14} />,
+  twitter: <IconBrandX size={14} />,
+  'youtube-shorts': <IconBrandYoutube size={14} />,
 };
 
 type LayoutType = 'single' | 'pip' | 'triple' | 'all';
@@ -124,6 +137,12 @@ export function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
   const [isTimelineDragging, setIsTimelineDragging] = useState(false);
+
+  // Format presets
+  const [format, setFormat] = useState<FormatType>('original');
+  const [showSafeZones, setShowSafeZones] = useState(false);
+  const formatPreset = useMemo(() => getFormatPreset(format), [format]);
+  const isPortraitFormat = formatPreset.aspectRatio > 0 && formatPreset.aspectRatio < 1;
 
   // Layout camera config
   const [layoutConfig, setLayoutConfig] = useState<LayoutCameraConfig>(DEFAULT_LAYOUT_CONFIG);
@@ -628,6 +647,56 @@ export function VideoPlayer({
 
   // Render video grid based on layout
   const renderVideoGrid = () => {
+    // Portrait/square social format — vertical composition
+    if (format !== 'original' && isPortraitFormat) {
+      const videoAr = videoAspectRatio || 16 / 9;
+      const pipCameras = layout !== 'single'
+        ? layoutConfig.pip.corners.filter(a =>
+            a !== 'none' && a !== 'map' && a !== selectedAngle && availableAngles.includes(a))
+        : [];
+      const hasMapPip = layout !== 'single' && layoutConfig.pip.corners.includes('map');
+      const hasGps = !!(mapSeiData?.latitude_deg && mapSeiData?.longitude_deg);
+
+      return (
+        <div className="relative w-full h-full bg-black flex flex-col">
+          {/* Main video - fills width */}
+          <div className="w-full flex-shrink-0 relative" style={{ aspectRatio: `${videoAr}` }}>
+            {renderVideo(selectedAngle, true, 'w-full h-full')}
+            <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm rounded px-2 py-0.5 text-[10px] font-medium flex items-center gap-1">
+              {ANGLE_ICONS[selectedAngle]} {ANGLE_LABELS[selectedAngle]}
+            </div>
+          </div>
+
+          {/* Sub cameras row */}
+          {pipCameras.length > 0 && (
+            <div className="flex gap-1 px-2 py-1.5 flex-shrink-0">
+              {pipCameras.map((angle, idx) => (
+                <div
+                  key={idx}
+                  className="flex-1 rounded-lg overflow-hidden border border-white/20 cursor-pointer hover:border-white/40 transition-colors"
+                  onClick={() => handleAngleChange(angle)}
+                >
+                  {renderVideo(angle, false, 'w-full')}
+                </div>
+              ))}
+              {hasMapPip && showMap && hasGps && (
+                <div className="flex-1 rounded-lg overflow-hidden border border-white/20 aspect-square">
+                  <Suspense fallback={<div className="bg-gray-900 w-full h-full" />}>
+                    <MapView seiData={mapSeiData} />
+                  </Suspense>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Remaining space */}
+          <div className="flex-1" />
+
+          {renderPlayOverlay()}
+        </div>
+      );
+    }
+
     // Single view - just one camera
     if (layout === 'single') {
       return (
@@ -791,7 +860,8 @@ export function VideoPlayer({
         ref={videoContainerRef}
         className={`relative bg-black rounded-xl overflow-hidden flex items-center justify-center ${
           isFullscreen ? 'flex-1' : 'max-h-[60vh]'
-        }`}
+        } ${isPortraitFormat ? 'self-center' : ''}`}
+        style={isPortraitFormat ? { aspectRatio: `${formatPreset.aspectRatio}` } : undefined}
       >
         {renderVideoGrid()}
 
@@ -801,9 +871,14 @@ export function VideoPlayer({
         >
           <div
             className={`relative pointer-events-none ${
-              layout === 'pip' && videoAspectRatio ? 'max-w-full max-h-full h-full' : 'w-full h-full'
+              (isPortraitFormat || layout === 'pip') && videoAspectRatio ? 'max-w-full max-h-full h-full' : 'w-full h-full'
             }`}
-            style={layout === 'pip' && videoAspectRatio ? { aspectRatio: `${videoAspectRatio}` } : undefined}
+            style={isPortraitFormat
+              ? { aspectRatio: `${formatPreset.aspectRatio}` }
+              : layout === 'pip' && videoAspectRatio
+                ? { aspectRatio: `${videoAspectRatio}` }
+                : undefined
+            }
           >
             {/* Telemetry Overlay - Top Center */}
             {showTelemetry && (
@@ -834,8 +909,8 @@ export function VideoPlayer({
               </div>
             )}
 
-            {/* Map Overlay - skip if map is already in a PiP corner */}
-            {showMap && !(layout === 'pip' && layoutConfig.pip.corners.includes('map')) && (
+            {/* Map Overlay - skip if in portrait PiP row or PiP corner */}
+            {showMap && !(isPortraitFormat && layout !== 'single' && layoutConfig.pip.corners.includes('map')) && !(layout === 'pip' && layoutConfig.pip.corners.includes('map')) && (
               <div className={`absolute w-[180px] h-[180px] rounded-lg overflow-hidden shadow-xl opacity-90 hover:opacity-100 transition-opacity pointer-events-auto ${
                 layout === 'pip' ? 'top-3 right-3' : 'bottom-3 right-3'
               }`}>
@@ -847,6 +922,28 @@ export function VideoPlayer({
                   <MapView seiData={mapSeiData} />
                 </Suspense>
               </div>
+            )}
+
+            {/* Safe Zone Overlay */}
+            {showSafeZones && formatPreset.safeZones.length > 0 && (
+              <>
+                {formatPreset.safeZones.map((zone, idx) => (
+                  <div
+                    key={idx}
+                    className="absolute border border-yellow-400/50 bg-yellow-400/8 rounded-sm pointer-events-none"
+                    style={{
+                      top: `${zone.top * 100}%`,
+                      left: `${zone.left * 100}%`,
+                      width: `${zone.width * 100}%`,
+                      height: `${zone.height * 100}%`,
+                    }}
+                  >
+                    <span className="absolute top-0.5 left-1 text-[7px] text-yellow-400/70 font-medium uppercase tracking-wider">
+                      {zone.label}
+                    </span>
+                  </div>
+                ))}
+              </>
             )}
           </div>
         </div>
@@ -1066,6 +1163,42 @@ export function VideoPlayer({
           {/* Divider */}
           <div className="w-px h-5 bg-gray-700" />
 
+          {/* Format buttons */}
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500 mr-1">Format:</span>
+            {FORMAT_PRESETS.map((f) => (
+              <Tooltip key={f.id} content={f.label} position="top">
+                <button
+                  onClick={() => setFormat(f.id)}
+                  className={`p-1.5 rounded text-xs font-medium transition-all ${
+                    format === f.id
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }`}
+                >
+                  {FORMAT_ICONS[f.id]}
+                </button>
+              </Tooltip>
+            ))}
+            {formatPreset.safeZones.length > 0 && (
+              <Tooltip content={showSafeZones ? 'Hide safe zones' : 'Show safe zones'} position="top">
+                <button
+                  onClick={() => setShowSafeZones(prev => !prev)}
+                  className={`px-1.5 py-1 rounded text-[10px] font-bold transition-all ${
+                    showSafeZones
+                      ? 'bg-yellow-500 text-black'
+                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }`}
+                >
+                  SAFE
+                </button>
+              </Tooltip>
+            )}
+          </div>
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-gray-700" />
+
           {/* Trim button */}
           <Tooltip content="Trim video (E)" position="top">
             <button
@@ -1165,6 +1298,7 @@ export function VideoPlayer({
               showMap={showMap}
               layout={layout}
               layoutConfig={layoutConfig}
+              format={format}
             />
 
             {/* Divider */}
