@@ -11,6 +11,7 @@ interface LayoutConfigPopoverProps {
   config: LayoutCameraConfig;
   onChange: (config: LayoutCameraConfig) => void;
   onClose: () => void;
+  isPortraitFormat?: boolean;
 }
 
 const ALL_ANGLES = ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar', 'right_pillar'];
@@ -61,6 +62,7 @@ export function LayoutConfigPopover({
   config,
   onChange,
   onClose,
+  isPortraitFormat = false,
 }: LayoutConfigPopoverProps) {
   // Close on Escape
   useEffect(() => {
@@ -88,6 +90,25 @@ export function LayoutConfigPopover({
       c[index] = angle;
       onChange({ ...config, pip: { corners: c } });
     };
+
+    // Portrait formats only use bottom 3 corners
+    if (isPortraitFormat) {
+      return (
+        <div className="space-y-2">
+          <div className="text-[10px] text-gray-400 text-center">Bottom cameras over main view</div>
+          <div className="relative bg-gray-900 rounded-lg border border-gray-600 mx-auto" style={{ aspectRatio: '9/16', maxHeight: '240px' }}>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-[10px] text-gray-600">Main Camera</span>
+            </div>
+            <div className="absolute bottom-1.5 left-1.5 right-1.5 flex justify-between items-end">
+              <CameraSelect value={corners[0]} onChange={(a) => update(0, a)} label="" options={PIP_OPTIONS} labels={PIP_LABELS} />
+              <CameraSelect value={corners[1]} onChange={(a) => update(1, a)} label="" options={PIP_OPTIONS} labels={PIP_LABELS} />
+              <CameraSelect value={corners[2]} onChange={(a) => update(2, a)} label="" options={PIP_OPTIONS} labels={PIP_LABELS} />
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="space-y-2">

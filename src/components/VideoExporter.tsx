@@ -620,7 +620,9 @@ export function VideoExporter({
 
       // Determine export layout angles from config
       const tripleAngles = [...layoutConfig.triple.cameras];
-      const pipAngles = layoutConfig.pip.corners.filter(
+      // Portrait formats only use bottom 3 corners
+      const pipCorners = isPortraitFormat ? layoutConfig.pip.corners.slice(0, 3) : layoutConfig.pip.corners;
+      const pipAngles = pipCorners.filter(
         a => a !== selectedAngle && a !== 'none' && a !== 'map'
       );
 
@@ -846,7 +848,7 @@ export function VideoExporter({
 
           // Draw PiP cameras overlaid at bottom
           const activePipAngles = pipAngles.filter(a => moment.videos.some(v => v.angle === a));
-          const showMapInPipRow = layoutConfig.pip.corners.includes('map') && showMap;
+          const showMapInPipRow = pipCorners.includes('map') && showMap;
           const pipCount = activePipAngles.length + (showMapInPipRow ? 1 : 0);
 
           if (pipCount > 0) {
@@ -1068,7 +1070,7 @@ export function VideoExporter({
           const dynamicTime = realTime.toTimeString().split(' ')[0];
           drawDateTime(ctx, overlayW, overlayH, dynamicDate, dynamicTime, showTelemetry);
         }
-        if (showMap && !(isPortraitFormat && layoutConfig.pip.corners.includes('map')) && !(layout === 'pip' && layoutConfig.pip.corners.includes('map'))) {
+        if (showMap && !(isPortraitFormat && pipCorners.includes('map')) && !(layout === 'pip' && layoutConfig.pip.corners.includes('map'))) {
           await drawMiniMap(ctx, seiData, overlayW, overlayH, layout === 'pip' ? 'top-right' : 'bottom-right');
         }
 

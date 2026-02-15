@@ -650,11 +650,13 @@ export function VideoPlayer({
   const renderVideoGrid = () => {
     // Portrait/square social format — main video fills entire container (center-crop)
     if (format !== 'original' && isPortraitFormat) {
+      // Portrait only uses bottom 3 corners (no top-left/top-right)
+      const portraitCorners = layoutConfig.pip.corners.slice(0, 3);
       const pipCameras = layout !== 'single'
-        ? layoutConfig.pip.corners.filter(a =>
+        ? portraitCorners.filter(a =>
             a !== 'none' && a !== 'map' && a !== selectedAngle && availableAngles.includes(a))
         : [];
-      const hasMapPip = layout !== 'single' && layoutConfig.pip.corners.includes('map');
+      const hasMapPip = layout !== 'single' && portraitCorners.includes('map');
       const hasGps = !!(mapSeiData?.latitude_deg && mapSeiData?.longitude_deg);
 
       return (
@@ -1177,6 +1179,7 @@ export function VideoPlayer({
                 config={layoutConfig}
                 onChange={handleLayoutConfigChange}
                 onClose={() => setShowLayoutConfig(false)}
+                isPortraitFormat={isPortraitFormat}
               />
             )}
           </div>
