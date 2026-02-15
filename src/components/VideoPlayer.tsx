@@ -631,23 +631,30 @@ export function VideoPlayer({
 
   // Render video grid based on layout
   const renderVideoGrid = () => {
-    // Single view - just one camera
+    // Single view - just one camera (same container structure as PiP, without corners)
     if (layout === 'single') {
+      const ar = videoAspectRatio || 16 / 9;
+
       return (
-        <div className="relative w-full bg-black flex items-center justify-center aspect-video max-h-full">
-          <div className="w-full h-full">
-            {renderVideo(selectedAngle, true, 'w-full h-full')}
-          </div>
-          <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-xs font-medium flex items-center gap-1">
-            {ANGLE_ICONS[selectedAngle]} {ANGLE_LABELS[selectedAngle]}
-          </div>
-          {/* Clip indicator for multi-clip sequences */}
-          {sequence.clipCount > 1 && (
-            <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-xs font-medium">
-              Clip {currentMomentIndex + 1}/{sequence.clipCount}
+        <div className="relative w-full bg-black flex items-center justify-center aspect-video max-h-full overflow-hidden">
+          <div
+            className="relative max-w-full max-h-full"
+            style={{ aspectRatio: `${ar}` }}
+          >
+            <div className="w-full h-full">
+              {renderVideo(selectedAngle, true, 'w-full h-full')}
             </div>
-          )}
-          {renderPlayOverlay()}
+            <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-xs font-medium flex items-center gap-1">
+              {ANGLE_ICONS[selectedAngle]} {ANGLE_LABELS[selectedAngle]}
+            </div>
+            {/* Clip indicator for multi-clip sequences */}
+            {sequence.clipCount > 1 && (
+              <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-xs font-medium">
+                Clip {currentMomentIndex + 1}/{sequence.clipCount}
+              </div>
+            )}
+            {renderPlayOverlay()}
+          </div>
         </div>
       );
     }
@@ -804,9 +811,9 @@ export function VideoPlayer({
         >
           <div
             className={`relative pointer-events-none ${
-              layout === 'pip' && videoAspectRatio ? 'max-w-full max-h-full h-full' : 'w-full h-full'
+              (layout === 'single' || layout === 'pip') && videoAspectRatio ? 'max-w-full max-h-full h-full' : 'w-full h-full'
             }`}
-            style={layout === 'pip' && videoAspectRatio ? { aspectRatio: `${videoAspectRatio}` } : undefined}
+            style={(layout === 'single' || layout === 'pip') && videoAspectRatio ? { aspectRatio: `${videoAspectRatio}` } : undefined}
           >
             {/* Telemetry Overlay - Top Center */}
             {showTelemetry && hasTelemetry && (
