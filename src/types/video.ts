@@ -175,7 +175,7 @@ export const ANGLE_COLORS: Record<string, string> = {
 };
 
 /** Social media format presets for export */
-export type FormatType = 'original' | 'tiktok' | 'instagram' | 'twitter' | 'youtube-shorts';
+export type FormatType = 'original' | 'tiktok' | 'instagram' | 'instagram-story' | 'twitter' | 'youtube-shorts';
 
 export interface SafeZone {
   label: string;
@@ -227,6 +227,18 @@ export const FORMAT_PRESETS: FormatPreset[] = [
     exportHeight: 1350,
     safeZones: [
       { label: 'Caption', top: 0.88, left: 0.02, width: 0.96, height: 0.1 },
+    ],
+  },
+  {
+    id: 'instagram-story',
+    label: 'Instagram Story',
+    shortLabel: 'Story',
+    aspectRatio: 9 / 16,
+    exportWidth: 1080,
+    exportHeight: 1920,
+    safeZones: [
+      { label: 'Username', top: 0.02, left: 0.02, width: 0.5, height: 0.06 },
+      { label: 'Reply & Send', top: 0.92, left: 0.02, width: 0.96, height: 0.06 },
     ],
   },
   {

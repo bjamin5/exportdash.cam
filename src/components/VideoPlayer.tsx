@@ -70,6 +70,7 @@ const FORMAT_ICONS: Record<string, ReactNode> = {
   original: <IconAspectRatio size={14} />,
   tiktok: <IconBrandTiktok size={14} />,
   instagram: <IconBrandInstagram size={14} />,
+  'instagram-story': <IconBrandInstagram size={14} />,
   twitter: <IconBrandX size={14} />,
   'youtube-shorts': <IconBrandYoutube size={14} />,
 };
@@ -647,9 +648,8 @@ export function VideoPlayer({
 
   // Render video grid based on layout
   const renderVideoGrid = () => {
-    // Portrait/square social format — vertical composition
+    // Portrait/square social format — main video fills entire container (center-crop)
     if (format !== 'original' && isPortraitFormat) {
-      const videoAr = videoAspectRatio || 16 / 9;
       const pipCameras = layout !== 'single'
         ? layoutConfig.pip.corners.filter(a =>
             a !== 'none' && a !== 'map' && a !== selectedAngle && availableAngles.includes(a))
@@ -658,29 +658,53 @@ export function VideoPlayer({
       const hasGps = !!(mapSeiData?.latitude_deg && mapSeiData?.longitude_deg);
 
       return (
-        <div className="relative w-full h-full bg-black flex flex-col">
-          {/* Main video - fills width */}
-          <div className="w-full flex-shrink-0 relative" style={{ aspectRatio: `${videoAr}` }}>
-            {renderVideo(selectedAngle, true, 'w-full h-full')}
-            <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm rounded px-2 py-0.5 text-[10px] font-medium flex items-center gap-1">
-              {ANGLE_ICONS[selectedAngle]} {ANGLE_LABELS[selectedAngle]}
-            </div>
+        <div className="relative w-full h-full bg-black overflow-hidden">
+          {/* Main video — fills entire container via object-cover (center-crop) */}
+          <div className="absolute inset-0">
+            {(() => {
+              const url = videoUrls[selectedAngle];
+              const isAvailable = availableAngles.includes(selectedAngle);
+              if (!url || !isAvailable) {
+                return <div className="w-full h-full bg-gray-900 flex items-center justify-center text-gray-600 text-xs">{ANGLE_LABELS[selectedAngle]}</div>;
+              }
+              return (
+                <video
+                  ref={(el) => {
+                    videoRefs.current[selectedAngle] = el;
+                    (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
+                  }}
+                  src={url}
+                  className="w-full h-full object-cover bg-black"
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onEnded={handleVideoEnded}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onClick={togglePlay}
+                />
+              );
+            })()}
           </div>
 
-          {/* Sub cameras row */}
+          {/* Angle label */}
+          <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-[10px] font-medium flex items-center gap-1 z-10">
+            {ANGLE_ICONS[selectedAngle]} {ANGLE_LABELS[selectedAngle]}
+          </div>
+
+          {/* PiP cameras overlaid at bottom */}
           {pipCameras.length > 0 && (
-            <div className="flex gap-1 px-2 py-1.5 flex-shrink-0">
+            <div className="absolute bottom-3 left-3 right-3 flex gap-1.5 z-10">
               {pipCameras.map((angle, idx) => (
                 <div
                   key={idx}
-                  className="flex-1 rounded-lg overflow-hidden border border-white/20 cursor-pointer hover:border-white/40 transition-colors"
+                  className="w-[22%] rounded-lg overflow-hidden border border-white/25 shadow-lg cursor-pointer hover:border-white/50 transition-colors"
                   onClick={() => handleAngleChange(angle)}
                 >
                   {renderVideo(angle, false, 'w-full')}
                 </div>
               ))}
               {hasMapPip && showMap && hasGps && (
-                <div className="flex-1 rounded-lg overflow-hidden border border-white/20 aspect-square">
+                <div className="w-[22%] rounded-lg overflow-hidden border border-white/25 shadow-lg aspect-square">
                   <Suspense fallback={<div className="bg-gray-900 w-full h-full" />}>
                     <MapView seiData={mapSeiData} />
                   </Suspense>
@@ -688,9 +712,6 @@ export function VideoPlayer({
               )}
             </div>
           )}
-
-          {/* Remaining space */}
-          <div className="flex-1" />
 
           {renderPlayOverlay()}
         </div>

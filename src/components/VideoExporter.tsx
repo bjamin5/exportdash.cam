@@ -831,53 +831,61 @@ export function VideoExporter({
           }
           await new Promise((r) => setTimeout(r, 10));
 
-          // Black background
+          // Draw main video as center-crop (object-cover equivalent)
           ctx.fillStyle = '#000';
           ctx.fillRect(0, 0, width, height);
-
-          // Draw main video filling width at top
           const mainSrcW = tempVideo.videoWidth || srcWidth;
           const mainSrcH = tempVideo.videoHeight || srcHeight;
-          const mainScale = width / mainSrcW;
-          const mainDrawH = Math.floor(mainSrcH * mainScale);
-          const mainY = 10;
-          ctx.drawImage(tempVideo, 0, mainY, width, mainDrawH);
+          // Scale to cover: pick the larger scale factor
+          const coverScale = Math.max(width / mainSrcW, height / mainSrcH);
+          const drawW = Math.floor(mainSrcW * coverScale);
+          const drawH = Math.floor(mainSrcH * coverScale);
+          const drawX = Math.floor((width - drawW) / 2);
+          const drawY = Math.floor((height - drawH) / 2);
+          ctx.drawImage(tempVideo, drawX, drawY, drawW, drawH);
 
-          // Draw PiP cameras in a row below main video
-          const pipRowY = mainY + mainDrawH + 8;
+          // Draw PiP cameras overlaid at bottom
           const activePipAngles = pipAngles.filter(a => moment.videos.some(v => v.angle === a));
           const showMapInPipRow = layoutConfig.pip.corners.includes('map') && showMap;
           const pipCount = activePipAngles.length + (showMapInPipRow ? 1 : 0);
 
           if (pipCount > 0) {
-            const pipGap = 6;
-            const pipMarginX = 12;
-            const totalGaps = (pipCount - 1) * pipGap + pipMarginX * 2;
-            const pipItemW = Math.floor((width - totalGaps) / pipCount);
+            const pipItemW = Math.floor(width * 0.22);
+            const pipMarginX = Math.floor(width * 0.02);
+            const pipGap = Math.floor(width * 0.015);
+            const pipBottomMargin = Math.floor(height * 0.02);
             let pipX = pipMarginX;
+
+            // Compute pip height from first available video
+            let pipItemH = Math.floor(pipItemW * 0.75);
+            for (const angle of activePipAngles) {
+              const ev = extraVideos[angle];
+              if (ev?.el.videoWidth) {
+                pipItemH = Math.floor(pipItemW * (ev.el.videoHeight / ev.el.videoWidth));
+                break;
+              }
+            }
+            const pipRowY = height - pipItemH - pipBottomMargin;
 
             for (const angle of activePipAngles) {
               const ev = extraVideos[angle];
               if (ev?.el.videoWidth) {
-                const pipItemH = Math.floor(pipItemW * (ev.el.videoHeight / ev.el.videoWidth));
-                // Rounded rect clip
+                const pH = Math.floor(pipItemW * (ev.el.videoHeight / ev.el.videoWidth));
                 ctx.save();
                 ctx.beginPath();
-                ctx.roundRect(pipX, pipRowY, pipItemW, pipItemH, 6);
+                ctx.roundRect(pipX, pipRowY, pipItemW, pH, 8);
                 ctx.clip();
-                ctx.drawImage(ev.el, pipX, pipRowY, pipItemW, pipItemH);
+                ctx.drawImage(ev.el, pipX, pipRowY, pipItemW, pH);
                 ctx.restore();
-                // Border
-                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctx.strokeStyle = 'rgba(255,255,255,0.25)';
                 ctx.lineWidth = 1;
                 ctx.beginPath();
-                ctx.roundRect(pipX, pipRowY, pipItemW, pipItemH, 6);
+                ctx.roundRect(pipX, pipRowY, pipItemW, pH, 8);
                 ctx.stroke();
               }
               pipX += pipItemW + pipGap;
             }
 
-            // Map in PiP row
             if (showMapInPipRow) {
               const rawPipSei = getSeiForTime(absoluteTime);
               const pipMapSei = rawPipSei?.latitude_deg && rawPipSei?.longitude_deg
