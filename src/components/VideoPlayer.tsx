@@ -880,8 +880,8 @@ export function VideoPlayer({
       <div
         ref={videoContainerRef}
         className={`relative bg-black rounded-xl overflow-hidden flex items-center justify-center ${
-          isFullscreen ? 'flex-1' : 'max-h-[60vh]'
-        } ${isPortraitFormat ? 'self-center' : ''}`}
+          isFullscreen ? 'flex-1' : isPortraitFormat ? 'h-[60vh] self-center' : 'max-h-[60vh]'
+        }`}
         style={isPortraitFormat ? { aspectRatio: `${formatPreset.aspectRatio}` } : undefined}
       >
         {renderVideoGrid()}
