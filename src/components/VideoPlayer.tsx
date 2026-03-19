@@ -112,6 +112,16 @@ const LAYOUTS: LayoutConfig[] = [
   },
 ];
 
+function loadOverlayConfig(): Record<string, unknown> {
+  try {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch { /* ignore corrupt localStorage */ }
+  return {};
+}
+
 export function VideoPlayer({
   sequences,
   selectedSequence: sequence,
@@ -133,33 +143,21 @@ export function VideoPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
 
   const [speedUnit, setSpeedUnit] = useState<'mph' | 'kmh'>(() => {
-    try {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
-      if (saved) { const c = JSON.parse(saved); if (c.speedUnit === 'mph' || c.speedUnit === 'kmh') return c.speedUnit; }
-    } catch { /* ignore */ }
-    return 'mph';
+    const c = loadOverlayConfig();
+    return c.speedUnit === 'mph' || c.speedUnit === 'kmh' ? c.speedUnit : 'mph';
   });
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showMap, setShowMap] = useState<boolean>(() => {
-    try {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
-      if (saved) { const c = JSON.parse(saved); if (typeof c.showMap === 'boolean') return c.showMap; }
-    } catch { /* ignore */ }
-    return true;
+    const c = loadOverlayConfig();
+    return typeof c.showMap === 'boolean' ? c.showMap : true;
   });
   const [showTelemetry, setShowTelemetry] = useState<boolean>(() => {
-    try {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
-      if (saved) { const c = JSON.parse(saved); if (typeof c.showTelemetry === 'boolean') return c.showTelemetry; }
-    } catch { /* ignore */ }
-    return true;
+    const c = loadOverlayConfig();
+    return typeof c.showTelemetry === 'boolean' ? c.showTelemetry : true;
   });
   const [showDateTime, setShowDateTime] = useState<boolean>(() => {
-    try {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
-      if (saved) { const c = JSON.parse(saved); if (typeof c.showDateTime === 'boolean') return c.showDateTime; }
-    } catch { /* ignore */ }
-    return true;
+    const c = loadOverlayConfig();
+    return typeof c.showDateTime === 'boolean' ? c.showDateTime : true;
   });
 
   // Persist overlay toggle states to localStorage
