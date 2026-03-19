@@ -131,11 +131,48 @@ export function VideoPlayer({
   const [currentMomentIndex, setCurrentMomentIndex] = useState(0);
   const [localTime, setLocalTime] = useState(0);  // Time within current clip
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speedUnit, setSpeedUnit] = useState<'mph' | 'kmh'>('mph');
+
+  const [speedUnit, setSpeedUnit] = useState<'mph' | 'kmh'>(() => {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
+      if (saved) { const c = JSON.parse(saved); if (c.speedUnit === 'mph' || c.speedUnit === 'kmh') return c.speedUnit; }
+    } catch { /* ignore */ }
+    return 'mph';
+  });
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [showMap, setShowMap] = useState(true);
-  const [showTelemetry, setShowTelemetry] = useState(true);
-  const [showDateTime, setShowDateTime] = useState(true);
+  const [showMap, setShowMap] = useState<boolean>(() => {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
+      if (saved) { const c = JSON.parse(saved); if (typeof c.showMap === 'boolean') return c.showMap; }
+    } catch { /* ignore */ }
+    return true;
+  });
+  const [showTelemetry, setShowTelemetry] = useState<boolean>(() => {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
+      if (saved) { const c = JSON.parse(saved); if (typeof c.showTelemetry === 'boolean') return c.showTelemetry; }
+    } catch { /* ignore */ }
+    return true;
+  });
+  const [showDateTime, setShowDateTime] = useState<boolean>(() => {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
+      if (saved) { const c = JSON.parse(saved); if (typeof c.showDateTime === 'boolean') return c.showDateTime; }
+    } catch { /* ignore */ }
+    return true;
+  });
+
+  // Persist overlay toggle states to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('exportdash-overlay-config', JSON.stringify({
+        showTelemetry,
+        showMap,
+        showDateTime,
+        speedUnit,
+      }));
+    } catch { /* ignore localStorage write errors */ }
+  }, [showTelemetry, showMap, showDateTime, speedUnit]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
   const [isTimelineDragging, setIsTimelineDragging] = useState(false);
@@ -972,7 +1009,9 @@ export function VideoPlayer({
             {/* Date/Time Overlay - Below Telemetry or Top Center */}
             {showDateTime && (
               <div className={`absolute left-1/2 -translate-x-1/2 pointer-events-none ${
-                showTelemetry ? 'top-[95px]' : 'top-3'
+                showTelemetry
+                  ? (seiData?.autopilot_state ?? 0) > 0 ? 'top-[105px]' : 'top-[95px]'
+                  : 'top-3'
               }`}>
                 <div className="px-2 py-1 rounded-md bg-black/50 backdrop-blur-sm text-white/90 text-xs font-medium">
                   {(() => {
@@ -1345,6 +1384,16 @@ export function VideoPlayer({
                 <IconBolt size={16} />
               </button>
             </Tooltip>
+            {showTelemetry && (
+              <Tooltip content={`Speed: ${speedUnit === 'mph' ? 'mph' : 'km/h'} (click to switch)`} position="top">
+                <button
+                  onClick={() => setSpeedUnit(prev => prev === 'mph' ? 'kmh' : 'mph')}
+                  className="px-1.5 h-[28px] flex items-center rounded transition-all bg-gray-700 text-gray-300 hover:bg-gray-600 text-[10px] font-bold leading-none"
+                >
+                  {speedUnit === 'mph' ? 'MPH' : 'KMH'}
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content="Map (M)" position="top">
               <button
                 onClick={() => setShowMap(prev => !prev)}
@@ -1367,14 +1416,6 @@ export function VideoPlayer({
                 }`}
               >
                 <IconClock size={16} />
-              </button>
-            </Tooltip>
-            <Tooltip content={`Speed: ${speedUnit === 'mph' ? 'mph' : 'km/h'} (click to switch)`} position="top">
-              <button
-                onClick={() => setSpeedUnit(prev => prev === 'mph' ? 'kmh' : 'mph')}
-                className="px-1.5 h-[28px] flex items-center rounded transition-all bg-gray-700 text-gray-300 hover:bg-gray-600 text-[10px] font-bold leading-none"
-              >
-                {speedUnit === 'mph' ? 'MPH' : 'KMH'}
               </button>
             </Tooltip>
 
