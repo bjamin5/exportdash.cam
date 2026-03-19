@@ -1010,7 +1010,7 @@ export function VideoPlayer({
             {showDateTime && (
               <div className={`absolute left-1/2 -translate-x-1/2 pointer-events-none ${
                 showTelemetry
-                  ? (seiData?.autopilot_state ?? 0) > 0 ? 'top-[105px]' : 'top-[95px]'
+                  ? [1, 2, 3].includes(seiData?.autopilot_state ?? 0) ? 'top-[105px]' : 'top-[95px]'
                   : 'top-3'
               }`}>
                 <div className="px-2 py-1 rounded-md bg-black/50 backdrop-blur-sm text-white/90 text-xs font-medium">
