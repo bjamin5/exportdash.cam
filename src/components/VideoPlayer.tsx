@@ -116,7 +116,10 @@ function loadOverlayConfig(): Record<string, unknown> {
   try {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
     if (saved) {
-      return JSON.parse(saved);
+      const parsed: unknown = JSON.parse(saved);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
     }
   } catch { /* ignore corrupt localStorage */ }
   return {};
@@ -142,23 +145,22 @@ export function VideoPlayer({
   const [localTime, setLocalTime] = useState(0);  // Time within current clip
   const [isPlaying, setIsPlaying] = useState(false);
 
-  const [speedUnit, setSpeedUnit] = useState<'mph' | 'kmh'>(() => {
-    const c = loadOverlayConfig();
-    return c.speedUnit === 'mph' || c.speedUnit === 'kmh' ? c.speedUnit : 'mph';
-  });
+  // Read overlay config once from localStorage for all initial states
+  const [initConfig] = useState(loadOverlayConfig);
+
+  const [speedUnit, setSpeedUnit] = useState<'mph' | 'kmh'>(
+    initConfig.speedUnit === 'mph' || initConfig.speedUnit === 'kmh' ? initConfig.speedUnit : 'mph'
+  );
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [showMap, setShowMap] = useState<boolean>(() => {
-    const c = loadOverlayConfig();
-    return typeof c.showMap === 'boolean' ? c.showMap : true;
-  });
-  const [showTelemetry, setShowTelemetry] = useState<boolean>(() => {
-    const c = loadOverlayConfig();
-    return typeof c.showTelemetry === 'boolean' ? c.showTelemetry : true;
-  });
-  const [showDateTime, setShowDateTime] = useState<boolean>(() => {
-    const c = loadOverlayConfig();
-    return typeof c.showDateTime === 'boolean' ? c.showDateTime : true;
-  });
+  const [showMap, setShowMap] = useState<boolean>(
+    typeof initConfig.showMap === 'boolean' ? initConfig.showMap : true
+  );
+  const [showTelemetry, setShowTelemetry] = useState<boolean>(
+    typeof initConfig.showTelemetry === 'boolean' ? initConfig.showTelemetry : true
+  );
+  const [showDateTime, setShowDateTime] = useState<boolean>(
+    typeof initConfig.showDateTime === 'boolean' ? initConfig.showDateTime : true
+  );
 
   // Persist overlay toggle states to localStorage
   useEffect(() => {
