@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { IconDownload, IconPlayerStop, IconLoader2, IconCheck } from '@tabler/icons-react';
 import { SeiData, SeiWithFrameIndex } from '@/lib/dashcam-mp4';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
-import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG } from '@/types/video';
+import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, FormatType, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, getPortraitLayout, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG } from '@/types/video';
 import { Tooltip } from './Tooltip';
 
 type LayoutType = 'single' | 'pip' | 'triple' | 'all';
@@ -23,6 +23,10 @@ interface VideoExporterProps {
   showMap?: boolean;
   layout?: LayoutType;
   layoutConfig?: LayoutCameraConfig;
+  format?: FormatType;
+  portraitLayout?: PortraitLayoutType;
+  portraitCameraConfig?: PortraitCameraConfig;
+  portraitAlignConfig?: PortraitAlignConfig;
 }
 
 // Map tile cache
@@ -110,6 +114,10 @@ export function VideoExporter({
   showMap = true,
   layout = 'single',
   layoutConfig = DEFAULT_LAYOUT_CONFIG,
+  format = 'original',
+  portraitLayout = 'p-1-2',
+  portraitCameraConfig = DEFAULT_PORTRAIT_CAMERA_CONFIG,
+  portraitAlignConfig = DEFAULT_PORTRAIT_ALIGN_CONFIG,
 }: VideoExporterProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
@@ -125,14 +133,14 @@ export function VideoExporter({
     };
   }, [exportUrl]);
 
-  // Get SEI data for a specific time (same logic as useSeiData hook)
+  // Get SEI data for a specific time with GPS interpolation between sparse messages
   const getSeiForTime = useCallback(
     (time: number): SeiData | null => {
       if (allSeiMessages.length === 0) return null;
 
       const frameIndex = Math.floor(time * fps);
 
-      // Binary search for nearest SEI message
+      // Binary search for last SEI message at or before this frame
       let left = 0;
       let right = allSeiMessages.length - 1;
 
@@ -145,7 +153,28 @@ export function VideoExporter({
         }
       }
 
-      return allSeiMessages[left]?.sei || null;
+      const before = allSeiMessages[left];
+      if (!before) return null;
+
+      // Interpolate GPS between bracketing messages for smoother map tracking
+      const after = allSeiMessages[left + 1];
+      if (after && before.sei.latitude_deg && before.sei.longitude_deg &&
+          after.sei.latitude_deg && after.sei.longitude_deg) {
+        const span = after.frameIndex - before.frameIndex;
+        if (span > 0) {
+          const t = Math.min(1, Math.max(0, (frameIndex - before.frameIndex) / span));
+          const lat = before.sei.latitude_deg + (after.sei.latitude_deg - before.sei.latitude_deg) * t;
+          const lng = before.sei.longitude_deg + (after.sei.longitude_deg - before.sei.longitude_deg) * t;
+          // Shortest-arc heading interpolation (handles 359°→1° wraparound)
+          let dHeading = (after.sei.heading_deg || 0) - (before.sei.heading_deg || 0);
+          if (dHeading > 180) dHeading -= 360;
+          if (dHeading < -180) dHeading += 360;
+          const heading = (before.sei.heading_deg || 0) + dHeading * t;
+          return { ...before.sei, latitude_deg: lat, longitude_deg: lng, heading_deg: heading };
+        }
+      }
+
+      return before.sei;
     },
     [allSeiMessages, fps]
   );
@@ -177,7 +206,11 @@ export function VideoExporter({
   ) => {
     if (!seiData) return;
 
-    const scale = Math.min(width / 1280, height / 720);
+    // Portrait formats use smaller reference so overlays stay proportional to width
+    const isPortrait = height > width;
+    const scale = isPortrait
+      ? Math.min(width / 540, height / 960)
+      : Math.min(width / 1280, height / 720);
     const padding = 12 * scale;
     const circleSize = 28 * scale;
     const circleGap = 5 * scale;
@@ -408,7 +441,10 @@ export function VideoExporter({
     time: string,
     telemetryVisible: boolean
   ) => {
-    const scale = Math.min(width / 1280, height / 720);
+    const isPortrait = height > width;
+    const scale = isPortrait
+      ? Math.min(width / 720, height / 1280)
+      : Math.min(width / 1280, height / 720);
     const padding = 12 * scale;
 
     // Format the date/time string
@@ -460,7 +496,10 @@ export function VideoExporter({
     if (!seiData?.latitude_deg || !seiData?.longitude_deg) return;
     if (seiData.latitude_deg === 0 && seiData.longitude_deg === 0) return;
 
-    const scale = Math.min(width / 1280, height / 720);
+    const isPortraitMap = height > width;
+    const scale = isPortraitMap
+      ? Math.min(width / 540, height / 960)
+      : Math.min(width / 1280, height / 720);
     const mapSize = typeof position === 'object' ? position.size : 160 * scale;
     const padding = 12 * scale;
     const x = typeof position === 'object' ? position.x : width - mapSize - padding;
@@ -613,17 +652,25 @@ export function VideoExporter({
       const srcHeight = tempVideo.videoHeight || 720;
 
       const maxDimension = 1920;
+      const formatPreset = getFormatPreset(format);
+      const isPortraitFormat = formatPreset.aspectRatio > 0 && formatPreset.aspectRatio < 1;
 
       // Determine export layout angles from config
       const tripleAngles = [...layoutConfig.triple.cameras];
-      const pipAngles = layoutConfig.pip.corners.filter(
+      // Portrait formats only use bottom 3 corners
+      const pipCorners = isPortraitFormat ? layoutConfig.pip.corners.slice(0, 3) : layoutConfig.pip.corners;
+      const pipAngles = pipCorners.filter(
         a => a !== selectedAngle && a !== 'none' && a !== 'map'
       );
 
       let width: number;
       let height: number;
 
-      if (layout === 'triple') {
+      if (format !== 'original' && formatPreset.exportWidth > 0) {
+        // Use format's target resolution
+        width = formatPreset.exportWidth;
+        height = formatPreset.exportHeight;
+      } else if (layout === 'triple') {
         // Load a side video to get its dimensions
         const pillarVideo = sequence.moments[0].videos.find(v => v.angle === tripleAngles[0]);
         let pillarW = srcWidth;
@@ -763,13 +810,36 @@ export function VideoExporter({
         return null;
       };
 
+      // Portrait layout metadata
+      const pLayoutMeta = getPortraitLayout(portraitLayout);
+      const pCameraSlots = portraitCameraConfig[portraitLayout] || DEFAULT_PORTRAIT_CAMERA_CONFIG[portraitLayout] || ['front'];
+      const pAlignSlots = portraitAlignConfig[portraitLayout] || DEFAULT_PORTRAIT_ALIGN_CONFIG[portraitLayout] || [];
+
+      // Convert AlignPosition to x/y factors (0 = start, 0.5 = center, 1 = end)
+      const alignToFactors = (align: AlignPosition): { fx: number; fy: number } => {
+        const parts = align.split(' ');
+        const v = parts[0] || 'center'; // top, center, bottom
+        const h = parts[1] || (parts[0] === 'center' ? 'center' : 'center');
+        const fy = v === 'top' ? 0 : v === 'bottom' ? 1 : 0.5;
+        const fx = h === 'left' ? 0 : h === 'right' ? 1 : 0.5;
+        return { fx, fy };
+      };
+
       // Prepare extra video elements for multi-angle layouts
-      const layoutAngles = layout === 'triple' ? tripleAngles
-        : layout === 'pip' ? pipAngles
-        : [];
+      let layoutAngles: string[];
+      if (isPortraitFormat && pLayoutMeta.slotCount > 1) {
+        // Portrait multi-camera: all slots except slot 0 (main, loaded into tempVideo)
+        layoutAngles = pCameraSlots.slice(1);
+      } else if (layout === 'triple') {
+        layoutAngles = tripleAngles;
+      } else if (layout === 'pip') {
+        layoutAngles = pipAngles;
+      } else {
+        layoutAngles = [];
+      }
 
       for (const angle of layoutAngles) {
-        createExtraVideo(angle);
+        if (!extraVideos[angle]) createExtraVideo(angle);
       }
 
       // Process frames within export range, respecting camera segments
@@ -798,7 +868,100 @@ export function VideoExporter({
 
         setStatus(`Processing: ${formatDuration(absoluteTime - exportStart)} / ${formatDuration(exportDuration)}`);
 
-        if (layout === 'triple') {
+        if (isPortraitFormat) {
+          // Portrait format — generic grid-based renderer from layout metadata
+          const mainSlotAngle = pCameraSlots[0] || 'front';
+
+          // Load main video (slot 0)
+          const needReload = currentLoadedClipIdx !== clipIdx || currentLoadedAngle !== mainSlotAngle;
+          if (needReload) {
+            const video = moment.videos.find(v => v.angle === mainSlotAngle) || moment.videos[0];
+            await loadVideo(video.file);
+            currentLoadedClipIdx = clipIdx;
+            currentLoadedAngle = video.angle;
+          }
+          await seekVideo(localTime);
+
+          // Load secondary slot videos
+          for (let si = 1; si < pCameraSlots.length; si++) {
+            const angle = pCameraSlots[si];
+            const ev = extraVideos[angle];
+            if (!ev) continue;
+            const video = moment.videos.find(v => v.angle === angle);
+            if (!video) continue;
+            if (ev.loadedClipIdx !== clipIdx) {
+              ev.blobUrl = await loadVideoInto(ev.el, video.file, ev.blobUrl);
+              ev.loadedClipIdx = clipIdx;
+            }
+            await seekVideoEl(ev.el, localTime);
+          }
+          await new Promise((r) => setTimeout(r, 10));
+
+          // Clear canvas
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+
+          // Compute row heights from rowWeights
+          const totalWeight = pLayoutMeta.rowWeights.reduce((a, b) => a + b, 0);
+          const gap = 1; // 1px gap between rows/cols, matches CSS
+          const totalRowGap = (pLayoutMeta.grid.length - 1) * gap;
+          const availH = height - totalRowGap;
+          let curY = 0;
+
+          for (let rowIdx = 0; rowIdx < pLayoutMeta.grid.length; rowIdx++) {
+            const row = pLayoutMeta.grid[rowIdx];
+            const rowH = Math.floor(availH * pLayoutMeta.rowWeights[rowIdx] / totalWeight);
+            const totalColGap = (row.length - 1) * gap;
+            const cellW = Math.floor((width - totalColGap) / row.length);
+            let curX = 0;
+
+            for (let colIdx = 0; colIdx < row.length; colIdx++) {
+              const slotIdx = row[colIdx];
+
+              if (slotIdx === -1) {
+                // Map slot
+                const rawMapSei = getSeiForTime(absoluteTime);
+                const mapSei = rawMapSei?.latitude_deg && rawMapSei?.longitude_deg
+                  ? rawMapSei
+                  : sequence.event?.est_lat && sequence.event?.est_lon
+                    ? { ...(rawMapSei || {}), latitude_deg: sequence.event.est_lat, longitude_deg: sequence.event.est_lon } as typeof rawMapSei
+                    : rawMapSei;
+                if (showMap) {
+                  await drawMiniMap(ctx, mapSei, width, height, { x: curX, y: curY, size: Math.min(cellW, rowH) });
+                }
+              } else {
+                const angle = pCameraSlots[slotIdx] || 'front';
+                const videoEl = slotIdx === 0 ? tempVideo : extraVideos[angle]?.el;
+
+                if (videoEl && videoEl.videoWidth) {
+                  const vw = videoEl.videoWidth;
+                  const vh = videoEl.videoHeight;
+
+                  // Center-crop (object-cover): scale to fill cell, clip overflow
+                  const coverScale = Math.max(cellW / vw, rowH / vh);
+                  const dw = Math.floor(vw * coverScale);
+                  const dh = Math.floor(vh * coverScale);
+                  // Use alignment to position the crop anchor
+                  const slotAlignPos = pAlignSlots[slotIdx] || 'center';
+                  const { fx, fy } = alignToFactors(slotAlignPos);
+                  const dx = curX + Math.floor((cellW - dw) * fx);
+                  const dy = curY + Math.floor((rowH - dh) * fy);
+                  ctx.save();
+                  ctx.beginPath();
+                  ctx.rect(curX, curY, cellW, rowH);
+                  ctx.clip();
+                  ctx.drawImage(videoEl, dx, dy, dw, dh);
+                  ctx.restore();
+                }
+              }
+
+              curX += cellW + gap;
+            }
+
+            curY += rowH + gap;
+          }
+
+        } else if (layout === 'triple') {
           // Load and seek all 3 angles
           const cellW = Math.floor(width / 3);
           const cellH = height;
@@ -955,17 +1118,19 @@ export function VideoExporter({
             : rawSeiData;
 
         // Draw overlays based on toggle states
+        const overlayW = width;
+        const overlayH = height;
         if (showTelemetry) {
-          drawTelemetry(ctx, seiData, width, height, telemetryIcons);
+          drawTelemetry(ctx, seiData, overlayW, overlayH, telemetryIcons);
         }
         if (showDateTime) {
           const realTime = new Date(moment.timestamp.getTime() + localTime * 1000);
           const dynamicDate = realTime.toISOString().split('T')[0];
           const dynamicTime = realTime.toTimeString().split(' ')[0];
-          drawDateTime(ctx, width, height, dynamicDate, dynamicTime, showTelemetry);
+          drawDateTime(ctx, overlayW, overlayH, dynamicDate, dynamicTime, showTelemetry);
         }
-        if (showMap && !(layout === 'pip' && layoutConfig.pip.corners.includes('map'))) {
-          await drawMiniMap(ctx, seiData, width, height, layout === 'pip' ? 'top-right' : 'bottom-right');
+        if (showMap && !(isPortraitFormat && pLayoutMeta.hasMap) && !(layout === 'pip' && layoutConfig.pip.corners.includes('map'))) {
+          await drawMiniMap(ctx, seiData, overlayW, overlayH, layout === 'pip' ? 'top-right' : 'bottom-right');
         }
 
         // Frame timestamp is relative to export start (0-based for exported video)
@@ -1029,7 +1194,7 @@ export function VideoExporter({
       }
       tempVideo.src = '';
     }
-  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig]);
+  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig, format, portraitLayout, portraitCameraConfig, portraitAlignConfig]);
 
   const stopExport = useCallback(() => {
     abortRef.current = true;

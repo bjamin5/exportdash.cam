@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback, lazy, Suspense, ReactNode, useMemo } from 'react';
 import { useSeiData } from '@/hooks/useSeiData';
 import { TelemetryCard } from './TelemetryCard';
-import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig } from '@/types/video';
+import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig } from '@/types/video';
 import { findMomentForTime, toAbsoluteTime } from '@/lib/sequence-detector';
 import {
   IconArrowUp,
@@ -35,9 +35,15 @@ import {
   IconWand,
   IconClock,
   IconSettings2,
+  IconAspectRatio,
+  IconBrandTiktok,
+  IconBrandInstagram,
+  IconBrandX,
+  IconBrandYoutube,
 } from '@tabler/icons-react';
 import { VideoExporter } from './VideoExporter';
 import { LayoutConfigPopover } from './LayoutConfigPopover';
+import { PortraitCameraSelector } from './PortraitCameraSelector';
 import { TelemetryTimeline } from './TelemetryTimeline';
 import { Tooltip } from './Tooltip';
 
@@ -59,6 +65,15 @@ const ANGLE_ICONS: Record<string, ReactNode> = {
   right_repeater: <IconArrowRight size={14} />,
   left_pillar: <IconArrowUpLeft size={14} />,
   right_pillar: <IconArrowUpRight size={14} />,
+};
+
+const FORMAT_ICONS: Record<string, ReactNode> = {
+  original: <IconAspectRatio size={14} />,
+  tiktok: <IconBrandTiktok size={14} />,
+  instagram: <IconBrandInstagram size={14} />,
+  'instagram-story': <IconBrandInstagram size={14} />,
+  twitter: <IconBrandX size={14} />,
+  'youtube-shorts': <IconBrandYoutube size={14} />,
 };
 
 type LayoutType = 'single' | 'pip' | 'triple' | 'all';
@@ -125,19 +140,63 @@ export function VideoPlayer({
   const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
   const [isTimelineDragging, setIsTimelineDragging] = useState(false);
 
+  // Format presets
+  const [format, setFormat] = useState<FormatType>('original');
+  const [showSafeZones, setShowSafeZones] = useState(false);
+  const formatPreset = useMemo(() => getFormatPreset(format), [format]);
+  const isPortraitFormat = formatPreset.aspectRatio > 0 && formatPreset.aspectRatio < 1;
+
   // Layout camera config
   const [layoutConfig, setLayoutConfig] = useState<LayoutCameraConfig>(DEFAULT_LAYOUT_CONFIG);
   const [showLayoutConfig, setShowLayoutConfig] = useState(false);
 
+  // Portrait layout state
+  const [portraitLayout, setPortraitLayout] = useState<PortraitLayoutType>('p-1-2');
+  const [portraitCameraConfig, setPortraitCameraConfig] = useState<PortraitCameraConfig>({ ...DEFAULT_PORTRAIT_CAMERA_CONFIG });
+  const [portraitAlignConfig, setPortraitAlignConfig] = useState<PortraitAlignConfig>({ ...DEFAULT_PORTRAIT_ALIGN_CONFIG });
+
   // Load layout config from localStorage on mount
   useEffect(() => {
     setLayoutConfig(loadLayoutConfig());
+    setPortraitLayout(loadPortraitLayout());
+    setPortraitCameraConfig(loadPortraitCameraConfig());
+    setPortraitAlignConfig(loadPortraitAlignConfig());
   }, []);
 
   const handleLayoutConfigChange = useCallback((newConfig: LayoutCameraConfig) => {
     setLayoutConfig(newConfig);
     saveLayoutConfig(newConfig);
   }, []);
+
+  const handlePortraitLayoutChange = useCallback((newLayout: PortraitLayoutType) => {
+    setPortraitLayout(newLayout);
+    savePortraitLayout(newLayout);
+  }, []);
+
+  const handlePortraitSlotChange = useCallback((slotIdx: number, newAngle: string) => {
+    setPortraitCameraConfig(prev => {
+      const slots = [...(prev[portraitLayout] || [])];
+      // If the newAngle is already assigned to another slot, swap
+      const existingIdx = slots.indexOf(newAngle);
+      if (existingIdx !== -1 && existingIdx !== slotIdx) {
+        slots[existingIdx] = slots[slotIdx];
+      }
+      slots[slotIdx] = newAngle;
+      const updated = { ...prev, [portraitLayout]: slots };
+      savePortraitCameraConfig(updated);
+      return updated;
+    });
+  }, [portraitLayout]);
+
+  const handlePortraitAlignChange = useCallback((slotIdx: number, align: AlignPosition) => {
+    setPortraitAlignConfig(prev => {
+      const slots = [...(prev[portraitLayout] || [])];
+      slots[slotIdx] = align;
+      const updated = { ...prev, [portraitLayout]: slots };
+      savePortraitAlignConfig(updated);
+      return updated;
+    });
+  }, [portraitLayout]);
 
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false);
@@ -628,6 +687,92 @@ export function VideoPlayer({
 
   // Render video grid based on layout
   const renderVideoGrid = () => {
+    // Portrait social format — use portrait layout system
+    if (format !== 'original' && isPortraitFormat) {
+      const layoutMeta = getPortraitLayout(portraitLayout);
+      const cameraSlots = portraitCameraConfig[portraitLayout] || DEFAULT_PORTRAIT_CAMERA_CONFIG[portraitLayout] || ['front'];
+      const hasGps = !!(mapSeiData?.latitude_deg && mapSeiData?.longitude_deg);
+
+      return (
+        <div className="relative w-full h-full bg-black overflow-hidden flex flex-col">
+          {layoutMeta.grid.map((row, rowIdx) => (
+            <div
+              key={rowIdx}
+              className="flex gap-[1px]"
+              style={{ flex: layoutMeta.rowWeights[rowIdx] }}
+            >
+              {row.map((slotIdx, colIdx) => {
+                // Map slot
+                if (slotIdx === -1) {
+                  return (
+                    <div key={colIdx} className="relative flex-1 bg-gray-900 flex items-center justify-center overflow-hidden isolate z-0">
+                      {hasGps && showMap ? (
+                        <Suspense fallback={<div className="bg-gray-900 w-full h-full" />}>
+                          <MapView seiData={mapSeiData} />
+                        </Suspense>
+                      ) : (
+                        <span className="text-gray-600 text-xs">Map</span>
+                      )}
+                    </div>
+                  );
+                }
+
+                const angle = cameraSlots[slotIdx] || 'front';
+                const isMain = slotIdx === 0;
+                const url = videoUrls[angle];
+                const isAvailable = availableAngles.includes(angle);
+                const alignSlots = portraitAlignConfig[portraitLayout] || [];
+                const slotAlign = alignSlots[slotIdx] || 'center';
+
+                return (
+                  <div key={colIdx} className="group relative flex-1 bg-black overflow-hidden">
+                    {url && isAvailable ? (
+                      <video
+                        ref={(el) => {
+                          videoRefs.current[angle] = el;
+                          if (isMain) {
+                            (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
+                          }
+                        }}
+                        src={url}
+                        className="w-full h-full object-cover bg-black"
+                        style={{ objectPosition: slotAlign }}
+                        muted={!isMain}
+                        onTimeUpdate={isMain ? handleTimeUpdate : undefined}
+                        onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
+                        onEnded={isMain ? handleVideoEnded : undefined}
+                        onPlay={isMain ? () => setIsPlaying(true) : undefined}
+                        onPause={isMain ? () => setIsPlaying(false) : undefined}
+                        onClick={togglePlay}
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-900 flex items-center justify-center text-gray-600 text-xs">
+                        {ANGLE_LABELS[angle] || angle}
+                      </div>
+                    )}
+                    {/* Camera selector + alignment overlay — hover-reveal */}
+                    <PortraitCameraSelector
+                      currentAngle={angle}
+                      availableAngles={availableAngles}
+                      assignedAngles={cameraSlots}
+                      onChange={(newAngle) => handlePortraitSlotChange(slotIdx, newAngle)}
+                      currentAlign={slotAlign}
+                      onAlignChange={(align) => handlePortraitAlignChange(slotIdx, align)}
+                    />
+                    {/* Main indicator */}
+                    {isMain && layoutMeta.slotCount > 1 && (
+                      <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-500 rounded-full z-10" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {renderPlayOverlay()}
+        </div>
+      );
+    }
+
     // Single view - just one camera
     if (layout === 'single') {
       return (
@@ -790,8 +935,9 @@ export function VideoPlayer({
       <div
         ref={videoContainerRef}
         className={`relative bg-black rounded-xl overflow-hidden flex items-center justify-center ${
-          isFullscreen ? 'flex-1' : 'max-h-[60vh]'
+          isFullscreen ? 'flex-1' : isPortraitFormat ? 'h-[60vh] self-center' : 'max-h-[60vh]'
         }`}
+        style={isPortraitFormat ? { aspectRatio: `${formatPreset.aspectRatio}` } : undefined}
       >
         {renderVideoGrid()}
 
@@ -801,9 +947,14 @@ export function VideoPlayer({
         >
           <div
             className={`relative pointer-events-none ${
-              layout === 'pip' && videoAspectRatio ? 'max-w-full max-h-full h-full' : 'w-full h-full'
+              (isPortraitFormat || layout === 'pip') && videoAspectRatio ? 'max-w-full max-h-full h-full' : 'w-full h-full'
             }`}
-            style={layout === 'pip' && videoAspectRatio ? { aspectRatio: `${videoAspectRatio}` } : undefined}
+            style={isPortraitFormat
+              ? { aspectRatio: `${formatPreset.aspectRatio}` }
+              : layout === 'pip' && videoAspectRatio
+                ? { aspectRatio: `${videoAspectRatio}` }
+                : undefined
+            }
           >
             {/* Telemetry Overlay - Top Center */}
             {showTelemetry && (
@@ -834,8 +985,8 @@ export function VideoPlayer({
               </div>
             )}
 
-            {/* Map Overlay - skip if map is already in a PiP corner */}
-            {showMap && !(layout === 'pip' && layoutConfig.pip.corners.includes('map')) && (
+            {/* Map Overlay - skip if portrait layout has map slot, or PiP corner has map */}
+            {showMap && !(isPortraitFormat && getPortraitLayout(portraitLayout).hasMap) && !(layout === 'pip' && layoutConfig.pip.corners.includes('map')) && (
               <div className={`absolute w-[180px] h-[180px] rounded-lg overflow-hidden shadow-xl opacity-90 hover:opacity-100 transition-opacity pointer-events-auto ${
                 layout === 'pip' ? 'top-3 right-3' : 'bottom-3 right-3'
               }`}>
@@ -847,6 +998,28 @@ export function VideoPlayer({
                   <MapView seiData={mapSeiData} />
                 </Suspense>
               </div>
+            )}
+
+            {/* Safe Zone Overlay */}
+            {showSafeZones && formatPreset.safeZones.length > 0 && (
+              <>
+                {formatPreset.safeZones.map((zone, idx) => (
+                  <div
+                    key={idx}
+                    className="absolute border border-yellow-400/50 bg-yellow-400/8 rounded-sm pointer-events-none"
+                    style={{
+                      top: `${zone.top * 100}%`,
+                      left: `${zone.left * 100}%`,
+                      width: `${zone.width * 100}%`,
+                      height: `${zone.height * 100}%`,
+                    }}
+                  >
+                    <span className="absolute top-0.5 left-1 text-[7px] text-yellow-400/70 font-medium uppercase tracking-wider">
+                      {zone.label}
+                    </span>
+                  </div>
+                ))}
+              </>
             )}
           </div>
         </div>
@@ -969,97 +1142,168 @@ export function VideoPlayer({
       {/* Control Bar: Camera + Layout + Date + Toggles */}
       <div className="bg-gray-800/50 rounded-xl px-3 py-2">
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Camera buttons — always visible, disabled for triple/all unless in edit mode */}
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-gray-500 mr-1">Cameras:</span>
-            {ANGLE_ORDER.map((angle) => {
-              const isAvailable = availableAngles.includes(angle);
-              const canSelect = layout === 'single' || layout === 'pip' || isEditMode || hasCustomCameraTrack;
-              const isDisabled = !isAvailable || !canSelect;
-              const isActive = selectedAngle === angle && !useCustomCameraTrack && canSelect;
+          {/* Camera buttons — only in landscape mode */}
+          {!isPortraitFormat && (
+            <>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-500 mr-1">Cameras:</span>
+                {ANGLE_ORDER.map((angle) => {
+                  const isAvailable = availableAngles.includes(angle);
+                  const canSelect = layout === 'single' || layout === 'pip' || isEditMode || hasCustomCameraTrack;
+                  const isDisabled = !isAvailable || !canSelect;
+                  const isActive = selectedAngle === angle && !useCustomCameraTrack && canSelect;
 
-              return (
-                <Tooltip key={angle} content={ANGLE_LABELS[angle]} position="top">
+                  return (
+                    <Tooltip key={angle} content={ANGLE_LABELS[angle]} position="top">
+                      <button
+                        disabled={isDisabled}
+                        onClick={() => {
+                          if (!isDisabled) {
+                            setUseCustomCameraTrack(false);
+                            handleAngleChange(angle);
+                          }
+                        }}
+                        className={`p-1.5 rounded text-xs font-medium transition-all ${
+                          isActive
+                            ? isEditMode ? 'bg-purple-600 text-white' : 'bg-blue-600 text-white'
+                            : isDisabled
+                            ? 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        }`}
+                      >
+                        {ANGLE_ICONS[angle]}
+                      </button>
+                    </Tooltip>
+                  );
+                })}
+                {hasCustomCameraTrack && (
+                  <Tooltip content="Use custom camera track" position="top">
+                    <button
+                      onClick={() => setUseCustomCameraTrack(true)}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-all flex items-center gap-1 ${
+                        useCustomCameraTrack
+                          ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      <IconWand size={14} />
+                      <span>Custom</span>
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+              <div className="w-px h-5 bg-gray-700" />
+            </>
+          )}
+
+          {/* Unified Layout section — swaps content based on format */}
+          <div className="flex items-center gap-1 relative">
+            <span className="text-[10px] text-gray-500 mr-1">Layout:</span>
+            {isPortraitFormat ? (
+              <>
+                {/* Portrait: current layout button + gear opens modal */}
+                <Tooltip content="Change portrait layout" position="top">
                   <button
-                    disabled={isDisabled}
-                    onClick={() => {
-                      if (!isDisabled) {
-                        setUseCustomCameraTrack(false);
-                        handleAngleChange(angle);
-                      }
-                    }}
-                    className={`p-1.5 rounded text-xs font-medium transition-all ${
-                      isActive
-                        ? isEditMode ? 'bg-purple-600 text-white' : 'bg-blue-600 text-white'
-                        : isDisabled
-                        ? 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
+                    onClick={() => setShowLayoutConfig(prev => !prev)}
+                    className={`px-2 py-1 rounded text-xs font-medium transition-all flex items-center gap-1 ${
+                      showLayoutConfig
+                        ? 'bg-blue-600 text-white'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     }`}
                   >
-                    {ANGLE_ICONS[angle]}
+                    <IconSettings2 size={14} />
+                    <span>{getPortraitLayout(portraitLayout).label}</span>
                   </button>
                 </Tooltip>
-              );
-            })}
-            {/* Custom camera track button */}
-            {hasCustomCameraTrack && (
-              <Tooltip content="Use custom camera track" position="top">
-                <button
-                  onClick={() => setUseCustomCameraTrack(true)}
-                  className={`px-2 py-1 rounded text-xs font-medium transition-all flex items-center gap-1 ${
-                    useCustomCameraTrack
-                      ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  <IconWand size={14} />
-                  <span>Custom</span>
-                </button>
-              </Tooltip>
+                {showLayoutConfig && (
+                  <LayoutConfigPopover
+                    layout={layout === 'single' ? 'pip' : layout}
+                    config={layoutConfig}
+                    onChange={handleLayoutConfigChange}
+                    onClose={() => setShowLayoutConfig(false)}
+                    isPortraitFormat={isPortraitFormat}
+                    portraitLayout={portraitLayout}
+                    onPortraitLayoutChange={handlePortraitLayoutChange}
+                  />
+                )}
+              </>
+            ) : (
+              <>
+                {/* Landscape: layout buttons + optional config gear */}
+                {LAYOUTS.map((l) => (
+                  <Tooltip key={l.id} content={l.label} position="top">
+                    <button
+                      onClick={() => handleLayoutChange(l.id)}
+                      className={`p-1.5 rounded text-xs font-medium transition-all ${
+                        layout === l.id
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                      }`}
+                    >
+                      {l.icon}
+                    </button>
+                  </Tooltip>
+                ))}
+                {layout !== 'single' && (
+                  <Tooltip content="Configure layout" position="top">
+                    <button
+                      onClick={() => setShowLayoutConfig(prev => !prev)}
+                      className={`p-1.5 rounded text-xs font-medium transition-all ${
+                        showLayoutConfig
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                      }`}
+                    >
+                      <IconSettings2 size={14} />
+                    </button>
+                  </Tooltip>
+                )}
+                {showLayoutConfig && layout !== 'single' && (
+                  <LayoutConfigPopover
+                    layout={layout}
+                    config={layoutConfig}
+                    onChange={handleLayoutConfigChange}
+                    onClose={() => setShowLayoutConfig(false)}
+                    isPortraitFormat={isPortraitFormat}
+                  />
+                )}
+              </>
             )}
           </div>
 
           {/* Divider */}
           <div className="w-px h-5 bg-gray-700" />
 
-          {/* Layout buttons */}
-          <div className="flex items-center gap-1 relative">
-            <span className="text-[10px] text-gray-500 mr-1">Layout:</span>
-            {LAYOUTS.map((l) => (
-              <Tooltip key={l.id} content={l.label} position="top">
+          {/* Format buttons */}
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500 mr-1">Format:</span>
+            {FORMAT_PRESETS.map((f) => (
+              <Tooltip key={f.id} content={f.label} position="top">
                 <button
-                  onClick={() => handleLayoutChange(l.id)}
+                  onClick={() => setFormat(f.id)}
                   className={`p-1.5 rounded text-xs font-medium transition-all ${
-                    layout === l.id
+                    format === f.id
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
                   }`}
                 >
-                  {l.icon}
+                  {FORMAT_ICONS[f.id]}
                 </button>
               </Tooltip>
             ))}
-            {layout !== 'single' && (
-              <Tooltip content="Configure layout" position="top">
+            {formatPreset.safeZones.length > 0 && (
+              <Tooltip content={showSafeZones ? 'Hide safe zones' : 'Show safe zones'} position="top">
                 <button
-                  onClick={() => setShowLayoutConfig(prev => !prev)}
-                  className={`p-1.5 rounded text-xs font-medium transition-all ${
-                    showLayoutConfig
-                      ? 'bg-blue-600 text-white'
+                  onClick={() => setShowSafeZones(prev => !prev)}
+                  className={`px-1.5 py-1 rounded text-[10px] font-bold transition-all ${
+                    showSafeZones
+                      ? 'bg-yellow-500 text-black'
                       : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
                   }`}
                 >
-                  <IconSettings2 size={14} />
+                  SAFE
                 </button>
               </Tooltip>
-            )}
-            {showLayoutConfig && layout !== 'single' && (
-              <LayoutConfigPopover
-                layout={layout}
-                config={layoutConfig}
-                onChange={handleLayoutConfigChange}
-                onClose={() => setShowLayoutConfig(false)}
-              />
             )}
           </div>
 
@@ -1165,6 +1409,10 @@ export function VideoPlayer({
               showMap={showMap}
               layout={layout}
               layoutConfig={layoutConfig}
+              format={format}
+              portraitLayout={portraitLayout}
+              portraitCameraConfig={portraitCameraConfig}
+              portraitAlignConfig={portraitAlignConfig}
             />
 
             {/* Divider */}
