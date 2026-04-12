@@ -749,7 +749,7 @@ export function TelemetryTimeline({
 
         {/* Playhead */}
         <div
-          className={`absolute top-0 bottom-0 w-0.5 bg-white shadow-lg z-10 pointer-events-none ${
+          className={`absolute top-0 bottom-0 w-0.5 bg-white shadow-lg z-[16] pointer-events-none ${
             isDragging ? 'w-1' : ''
           }`}
           style={{ left: `${playheadPosition}%` }}

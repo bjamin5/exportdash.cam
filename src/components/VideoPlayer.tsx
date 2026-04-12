@@ -112,6 +112,19 @@ const LAYOUTS: LayoutConfig[] = [
   },
 ];
 
+function loadOverlayConfig(): Record<string, unknown> {
+  try {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('exportdash-overlay-config') : null;
+    if (saved) {
+      const parsed: unknown = JSON.parse(saved);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    }
+  } catch { /* ignore corrupt localStorage */ }
+  return {};
+}
+
 export function VideoPlayer({
   sequences,
   selectedSequence: sequence,
@@ -131,11 +144,35 @@ export function VideoPlayer({
   const [currentMomentIndex, setCurrentMomentIndex] = useState(0);
   const [localTime, setLocalTime] = useState(0);  // Time within current clip
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speedUnit, setSpeedUnit] = useState<'mph' | 'kmh'>('mph');
+
+  // Read overlay config once from localStorage for all initial states
+  const [initConfig] = useState(loadOverlayConfig);
+
+  const [speedUnit, setSpeedUnit] = useState<'mph' | 'kmh'>(
+    initConfig.speedUnit === 'mph' || initConfig.speedUnit === 'kmh' ? initConfig.speedUnit : 'mph'
+  );
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [showMap, setShowMap] = useState(true);
-  const [showTelemetry, setShowTelemetry] = useState(true);
-  const [showDateTime, setShowDateTime] = useState(true);
+  const [showMap, setShowMap] = useState<boolean>(
+    typeof initConfig.showMap === 'boolean' ? initConfig.showMap : true
+  );
+  const [showTelemetry, setShowTelemetry] = useState<boolean>(
+    typeof initConfig.showTelemetry === 'boolean' ? initConfig.showTelemetry : true
+  );
+  const [showDateTime, setShowDateTime] = useState<boolean>(
+    typeof initConfig.showDateTime === 'boolean' ? initConfig.showDateTime : true
+  );
+
+  // Persist overlay toggle states to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('exportdash-overlay-config', JSON.stringify({
+        showTelemetry,
+        showMap,
+        showDateTime,
+        speedUnit,
+      }));
+    } catch { /* ignore localStorage write errors */ }
+  }, [showTelemetry, showMap, showDateTime, speedUnit]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
   const [isTimelineDragging, setIsTimelineDragging] = useState(false);
@@ -972,7 +1009,9 @@ export function VideoPlayer({
             {/* Date/Time Overlay - Below Telemetry or Top Center */}
             {showDateTime && (
               <div className={`absolute left-1/2 -translate-x-1/2 pointer-events-none ${
-                showTelemetry ? 'top-[95px]' : 'top-3'
+                showTelemetry
+                  ? [1, 2, 3].includes(seiData?.autopilot_state ?? 0) ? 'top-[105px]' : 'top-[95px]'
+                  : 'top-3'
               }`}>
                 <div className="px-2 py-1 rounded-md bg-black/50 backdrop-blur-sm text-white/90 text-xs font-medium">
                   {(() => {
@@ -1345,6 +1384,16 @@ export function VideoPlayer({
                 <IconBolt size={16} />
               </button>
             </Tooltip>
+            {showTelemetry && (
+              <Tooltip content={`Speed: ${speedUnit === 'mph' ? 'mph' : 'km/h'} (click to switch)`} position="top">
+                <button
+                  onClick={() => setSpeedUnit(prev => prev === 'mph' ? 'kmh' : 'mph')}
+                  className="px-1.5 h-[28px] flex items-center rounded transition-all bg-gray-700 text-gray-300 hover:bg-gray-600 text-[10px] font-bold leading-none"
+                >
+                  {speedUnit === 'mph' ? 'MPH' : 'KMH'}
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content="Map (M)" position="top">
               <button
                 onClick={() => setShowMap(prev => !prev)}
@@ -1367,14 +1416,6 @@ export function VideoPlayer({
                 }`}
               >
                 <IconClock size={16} />
-              </button>
-            </Tooltip>
-            <Tooltip content={`Speed: ${speedUnit === 'mph' ? 'mph' : 'km/h'} (click to switch)`} position="top">
-              <button
-                onClick={() => setSpeedUnit(prev => prev === 'mph' ? 'kmh' : 'mph')}
-                className="px-1.5 h-[28px] flex items-center rounded transition-all bg-gray-700 text-gray-300 hover:bg-gray-600 text-[10px] font-bold leading-none"
-              >
-                {speedUnit === 'mph' ? 'MPH' : 'KMH'}
               </button>
             </Tooltip>
 
