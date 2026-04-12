@@ -268,6 +268,205 @@ export function getFormatPreset(id: FormatType): FormatPreset {
   return FORMAT_PRESETS.find(f => f.id === id) || FORMAT_PRESETS[0];
 }
 
+/** Portrait layout types for social media formats */
+export type PortraitLayoutType = 'p-single' | 'p-split' | 'p-1-2' | 'p-grid' | 'p-1-2-1' | 'p-six' | 'p-six-map';
+
+export interface PortraitLayoutMeta {
+  id: PortraitLayoutType;
+  label: string;
+  description: string;
+  slotCount: number;
+  hasMap: boolean;
+  /** Row arrays of slot indices; -1 = map placeholder */
+  grid: number[][];
+  /** Flex weight for each row */
+  rowWeights: number[];
+}
+
+export const PORTRAIT_LAYOUTS: PortraitLayoutMeta[] = [
+  {
+    id: 'p-single',
+    label: 'Single',
+    description: 'Full frame',
+    slotCount: 1,
+    hasMap: false,
+    grid: [[0]],
+    rowWeights: [1],
+  },
+  {
+    id: 'p-split',
+    label: 'Split',
+    description: 'Two cameras stacked',
+    slotCount: 2,
+    hasMap: false,
+    grid: [[0], [1]],
+    rowWeights: [1, 1],
+  },
+  {
+    id: 'p-1-2',
+    label: '1 + 2',
+    description: 'Main top, two below',
+    slotCount: 3,
+    hasMap: false,
+    grid: [[0], [1, 2]],
+    rowWeights: [3, 2],
+  },
+  {
+    id: 'p-grid',
+    label: 'Grid',
+    description: '2×2 grid',
+    slotCount: 4,
+    hasMap: false,
+    grid: [[0, 1], [2, 3]],
+    rowWeights: [1, 1],
+  },
+  {
+    id: 'p-1-2-1',
+    label: '1+2+1',
+    description: 'Top, two middle, bottom',
+    slotCount: 4,
+    hasMap: false,
+    grid: [[0], [1, 2], [3]],
+    rowWeights: [2, 1, 2],
+  },
+  {
+    id: 'p-six',
+    label: 'All 6',
+    description: '2×3 grid',
+    slotCount: 6,
+    hasMap: false,
+    grid: [[0, 1], [2, 3], [4, 5]],
+    rowWeights: [1, 1, 1],
+  },
+  {
+    id: 'p-six-map',
+    label: '6 + Map',
+    description: '5 cameras + map',
+    slotCount: 5,
+    hasMap: true,
+    grid: [[0, 1], [2, 3], [4, -1]],
+    rowWeights: [1, 1, 1],
+  },
+];
+
+export function getPortraitLayout(id: PortraitLayoutType): PortraitLayoutMeta {
+  return PORTRAIT_LAYOUTS.find(l => l.id === id) || PORTRAIT_LAYOUTS[2]; // default to p-1-2
+}
+
+/** Portrait camera configuration — maps layout ID to array of camera angles per slot */
+export type PortraitCameraConfig = Record<string, string[]>;
+
+export const DEFAULT_PORTRAIT_CAMERA_CONFIG: PortraitCameraConfig = {
+  'p-single': ['front'],
+  'p-split': ['front', 'back'],
+  'p-1-2': ['front', 'left_repeater', 'right_repeater'],
+  'p-grid': ['front', 'back', 'left_repeater', 'right_repeater'],
+  'p-1-2-1': ['front', 'left_repeater', 'right_repeater', 'back'],
+  'p-six': ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar', 'right_pillar'],
+  'p-six-map': ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar'],
+};
+
+const PORTRAIT_LAYOUT_KEY = 'tesla-cam-portrait-layout';
+const PORTRAIT_CAMERA_CONFIG_KEY = 'tesla-cam-portrait-camera-config';
+
+export function loadPortraitLayout(): PortraitLayoutType {
+  try {
+    const stored = localStorage.getItem(PORTRAIT_LAYOUT_KEY);
+    if (stored && PORTRAIT_LAYOUTS.some(l => l.id === stored)) {
+      return stored as PortraitLayoutType;
+    }
+    return 'p-1-2';
+  } catch {
+    return 'p-1-2';
+  }
+}
+
+export function savePortraitLayout(layout: PortraitLayoutType): void {
+  try {
+    localStorage.setItem(PORTRAIT_LAYOUT_KEY, layout);
+  } catch {
+    // Silently fail
+  }
+}
+
+export function loadPortraitCameraConfig(): PortraitCameraConfig {
+  try {
+    const stored = localStorage.getItem(PORTRAIT_CAMERA_CONFIG_KEY);
+    if (!stored) return { ...DEFAULT_PORTRAIT_CAMERA_CONFIG };
+    const parsed = JSON.parse(stored);
+    // Merge with defaults — only keep entries that have correct slot count
+    const result: PortraitCameraConfig = {};
+    for (const layout of PORTRAIT_LAYOUTS) {
+      const storedSlots = parsed?.[layout.id];
+      if (Array.isArray(storedSlots) && storedSlots.length === layout.slotCount) {
+        result[layout.id] = storedSlots;
+      } else {
+        result[layout.id] = [...(DEFAULT_PORTRAIT_CAMERA_CONFIG[layout.id] || [])];
+      }
+    }
+    return result;
+  } catch {
+    return { ...DEFAULT_PORTRAIT_CAMERA_CONFIG };
+  }
+}
+
+export function savePortraitCameraConfig(config: PortraitCameraConfig): void {
+  try {
+    localStorage.setItem(PORTRAIT_CAMERA_CONFIG_KEY, JSON.stringify(config));
+  } catch {
+    // Silently fail
+  }
+}
+
+/** Alignment position for object-cover crop anchor (3×3 grid) */
+export type AlignPosition =
+  | 'top left' | 'top center' | 'top right'
+  | 'center left' | 'center' | 'center right'
+  | 'bottom left' | 'bottom center' | 'bottom right';
+
+/** Maps layout ID to array of alignment positions per slot */
+export type PortraitAlignConfig = Record<string, AlignPosition[]>;
+
+export const DEFAULT_PORTRAIT_ALIGN_CONFIG: PortraitAlignConfig = {
+  'p-single': ['center'],
+  'p-split': ['center', 'center'],
+  'p-1-2': ['center', 'center', 'center'],
+  'p-grid': ['center', 'center', 'center', 'center'],
+  'p-1-2-1': ['center', 'center', 'center', 'center'],
+  'p-six': ['center', 'center', 'center', 'center', 'center', 'center'],
+  'p-six-map': ['center', 'center', 'center', 'center', 'center'],
+};
+
+const PORTRAIT_ALIGN_CONFIG_KEY = 'tesla-cam-portrait-align-config';
+
+export function loadPortraitAlignConfig(): PortraitAlignConfig {
+  try {
+    const stored = localStorage.getItem(PORTRAIT_ALIGN_CONFIG_KEY);
+    if (!stored) return { ...DEFAULT_PORTRAIT_ALIGN_CONFIG };
+    const parsed = JSON.parse(stored);
+    const result: PortraitAlignConfig = {};
+    for (const layout of PORTRAIT_LAYOUTS) {
+      const storedSlots = parsed?.[layout.id];
+      if (Array.isArray(storedSlots) && storedSlots.length === layout.slotCount) {
+        result[layout.id] = storedSlots;
+      } else {
+        result[layout.id] = [...(DEFAULT_PORTRAIT_ALIGN_CONFIG[layout.id] || [])];
+      }
+    }
+    return result;
+  } catch {
+    return { ...DEFAULT_PORTRAIT_ALIGN_CONFIG };
+  }
+}
+
+export function savePortraitAlignConfig(config: PortraitAlignConfig): void {
+  try {
+    localStorage.setItem(PORTRAIT_ALIGN_CONFIG_KEY, JSON.stringify(config));
+  } catch {
+    // Silently fail
+  }
+}
+
 /** Parse camera angle from filename */
 export function parseAngle(filename: string): string | null {
   const lower = filename.toLowerCase();

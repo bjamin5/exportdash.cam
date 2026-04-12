@@ -136,6 +136,43 @@ export function useSeiData(
         allMessages.sort((a, b) => a.absoluteFrameIndex - b.absoluteFrameIndex);
 
         console.log(`[SEI] Total messages across sequence: ${allMessages.length}`);
+
+        // --- DEBUG: Dump frame data summary ---
+        if (allMessages.length > 0) {
+          const sample = allMessages[0].sei;
+          const allKeys = Object.keys(sample) as (keyof SeiData)[];
+          console.log('[DEBUG] First frame SEI keys:', allKeys);
+          console.log('[DEBUG] First frame SEI data:', JSON.parse(JSON.stringify(sample)));
+
+          // Show which fields are populated across all messages
+          const fieldStats: Record<string, { present: number; sample: unknown }> = {};
+          for (const key of allKeys) {
+            const present = allMessages.filter(m => m.sei[key] !== undefined && m.sei[key] !== null).length;
+            fieldStats[key] = { present, sample: sample[key] };
+          }
+          console.table(fieldStats);
+
+          // Log first 5 frames for inspection
+          console.log('[DEBUG] First 5 frames:', allMessages.slice(0, 5).map(m => ({
+            frameIndex: m.frameIndex,
+            absoluteFrameIndex: m.absoluteFrameIndex,
+            momentIndex: m.momentIndex,
+            ...JSON.parse(JSON.stringify(m.sei)),
+          })));
+
+          // Log GPS availability
+          const gpsFrames = allMessages.filter(m => m.sei.latitude_deg && m.sei.longitude_deg);
+          console.log(`[DEBUG] GPS data available in ${gpsFrames.length}/${allMessages.length} frames`);
+          if (gpsFrames.length > 0) {
+            console.log('[DEBUG] First GPS point:', {
+              lat: gpsFrames[0].sei.latitude_deg,
+              lng: gpsFrames[0].sei.longitude_deg,
+              heading: gpsFrames[0].sei.heading_deg,
+            });
+          }
+        }
+        // --- END DEBUG ---
+
         setAllSeiMessages(allMessages);
         setFps(sequenceFps);
         lastSequenceIdRef.current = sequence.id;
@@ -154,14 +191,14 @@ export function useSeiData(
     extractAllSei();
   }, [sequence?.id]);
 
-  // Find SEI data for current absolute time
+  // Find SEI data for current absolute time with GPS interpolation
   const getSeiForTime = useCallback(
     (time: number): SeiData | null => {
       if (allSeiMessages.length === 0) return null;
 
       const absoluteFrameIndex = Math.floor(time * fps);
 
-      // Binary search for nearest SEI message
+      // Binary search for last SEI message at or before this frame
       let left = 0;
       let right = allSeiMessages.length - 1;
 
@@ -174,15 +211,40 @@ export function useSeiData(
         }
       }
 
-      return allSeiMessages[left]?.sei || null;
+      const before = allSeiMessages[left];
+      if (!before) return null;
+
+      // Interpolate GPS between bracketing messages for smoother map tracking
+      const after = allSeiMessages[left + 1];
+      if (after && before.sei.latitude_deg && before.sei.longitude_deg &&
+          after.sei.latitude_deg && after.sei.longitude_deg) {
+        const span = after.absoluteFrameIndex - before.absoluteFrameIndex;
+        if (span > 0) {
+          const t = Math.min(1, Math.max(0, (absoluteFrameIndex - before.absoluteFrameIndex) / span));
+          const lat = before.sei.latitude_deg + (after.sei.latitude_deg - before.sei.latitude_deg) * t;
+          const lng = before.sei.longitude_deg + (after.sei.longitude_deg - before.sei.longitude_deg) * t;
+          // Shortest-arc heading interpolation (handles 359°→1° wraparound)
+          let dHeading = (after.sei.heading_deg || 0) - (before.sei.heading_deg || 0);
+          if (dHeading > 180) dHeading -= 360;
+          if (dHeading < -180) dHeading += 360;
+          const heading = (before.sei.heading_deg || 0) + dHeading * t;
+          return { ...before.sei, latitude_deg: lat, longitude_deg: lng, heading_deg: heading };
+        }
+      }
+
+      return before.sei;
     },
     [allSeiMessages, fps]
   );
 
-  const seiData = useMemo(
-    () => getSeiForTime(absoluteTime),
-    [getSeiForTime, absoluteTime]
-  );
+  const seiData = useMemo(() => {
+    const data = getSeiForTime(absoluteTime);
+    if (data && Math.round(absoluteTime * 10) % 50 === 0) {
+      // Log every ~5 seconds to avoid spam
+      console.log(`[DEBUG] Frame @ ${absoluteTime.toFixed(2)}s:`, JSON.parse(JSON.stringify(data)));
+    }
+    return data;
+  }, [getSeiForTime, absoluteTime]);
 
   // Convert back to the standard format for consumers
   const normalizedMessages = useMemo((): SeiWithFrameIndex[] => {

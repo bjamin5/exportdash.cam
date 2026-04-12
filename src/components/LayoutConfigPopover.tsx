@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useCallback } from 'react';
-import { LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, ANGLE_LABELS } from '@/types/video';
-import { IconRefresh, IconX } from '@tabler/icons-react';
+import { LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, ANGLE_LABELS, PortraitLayoutType, PortraitLayoutMeta, PORTRAIT_LAYOUTS } from '@/types/video';
+import { IconRefresh, IconX, IconMapPin } from '@tabler/icons-react';
 
 type LayoutType = 'pip' | 'triple' | 'all';
 
@@ -12,6 +12,8 @@ interface LayoutConfigPopoverProps {
   onChange: (config: LayoutCameraConfig) => void;
   onClose: () => void;
   isPortraitFormat?: boolean;
+  portraitLayout?: PortraitLayoutType;
+  onPortraitLayoutChange?: (layout: PortraitLayoutType) => void;
 }
 
 const ALL_ANGLES = ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar', 'right_pillar'];
@@ -57,12 +59,53 @@ function CameraSelect({
   );
 }
 
+/** Mini thumbnail preview of a portrait layout grid */
+function LayoutThumbnail({ meta, isSelected }: { meta: PortraitLayoutMeta; isSelected: boolean }) {
+  const slotColors = [
+    'bg-blue-500', 'bg-purple-500', 'bg-emerald-500', 'bg-amber-500', 'bg-cyan-500', 'bg-pink-500',
+  ];
+
+  return (
+    <div
+      className={`flex flex-col gap-[2px] rounded-md border p-[3px] transition-colors ${
+        isSelected ? 'border-blue-500 bg-blue-500/10' : 'border-gray-600 bg-gray-900'
+      }`}
+      style={{ aspectRatio: '9/16', width: '36px' }}
+    >
+      {meta.grid.map((row, rowIdx) => (
+        <div
+          key={rowIdx}
+          className="flex gap-[2px]"
+          style={{ flex: meta.rowWeights[rowIdx] }}
+        >
+          {row.map((slotIdx, colIdx) => (
+            <div
+              key={colIdx}
+              className={`flex-1 rounded-[2px] flex items-center justify-center ${
+                slotIdx === -1
+                  ? 'bg-green-800/60'
+                  : isSelected
+                  ? slotColors[slotIdx % slotColors.length]
+                  : 'bg-gray-700'
+              }`}
+            >
+              {slotIdx === -1 && <IconMapPin size={8} className="text-green-400" />}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function LayoutConfigPopover({
   layout,
   config,
   onChange,
   onClose,
   isPortraitFormat = false,
+  portraitLayout,
+  onPortraitLayoutChange,
 }: LayoutConfigPopoverProps) {
   // Close on Escape
   useEffect(() => {
@@ -202,6 +245,40 @@ export function LayoutConfigPopover({
     all: 'All 6 Layout',
   };
 
+  // Portrait layout picker
+  const renderPortraitPicker = () => {
+    if (!portraitLayout || !onPortraitLayoutChange) return null;
+
+    return (
+      <div className="space-y-3">
+        <div className="text-[10px] text-gray-400 text-center">Choose a portrait layout</div>
+        <div className="grid grid-cols-4 gap-2">
+          {PORTRAIT_LAYOUTS.map((meta) => {
+            const isSelected = meta.id === portraitLayout;
+            return (
+              <button
+                key={meta.id}
+                onClick={() => { onPortraitLayoutChange(meta.id); onClose(); }}
+                className={`flex flex-col items-center gap-1.5 p-2 rounded-lg border transition-all ${
+                  isSelected
+                    ? 'border-blue-500 bg-blue-500/10'
+                    : 'border-gray-700 bg-gray-800/50 hover:border-gray-500 hover:bg-gray-800'
+                }`}
+              >
+                <LayoutThumbnail meta={meta} isSelected={isSelected} />
+                <span className={`text-[10px] font-medium ${isSelected ? 'text-blue-300' : 'text-gray-400'}`}>
+                  {meta.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const isPortraitPicker = isPortraitFormat && portraitLayout && onPortraitLayoutChange;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
       <div
@@ -209,24 +286,34 @@ export function LayoutConfigPopover({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <h4 className="text-sm font-semibold text-gray-200">{titles[layout]}</h4>
+          <h4 className="text-sm font-semibold text-gray-200">
+            {isPortraitPicker ? 'Portrait Layout' : titles[layout]}
+          </h4>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
-            >
-              <IconRefresh size={10} />
-              Reset
-            </button>
+            {!isPortraitPicker && (
+              <button
+                onClick={handleReset}
+                className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                <IconRefresh size={10} />
+                Reset
+              </button>
+            )}
             <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
               <IconX size={14} />
             </button>
           </div>
         </div>
 
-        {layout === 'pip' && renderPipConfig()}
-        {layout === 'triple' && renderTripleConfig()}
-        {layout === 'all' && renderAllConfig()}
+        {isPortraitPicker ? (
+          renderPortraitPicker()
+        ) : (
+          <>
+            {layout === 'pip' && renderPipConfig()}
+            {layout === 'triple' && renderTripleConfig()}
+            {layout === 'all' && renderAllConfig()}
+          </>
+        )}
       </div>
     </div>
   );
