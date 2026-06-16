@@ -241,9 +241,10 @@ export function TelemetryGraphs({
   return (
     <div
       ref={containerRef}
-      className={`relative bg-black overflow-hidden select-none h-full ${
+      className={`relative bg-black rounded-xl overflow-hidden select-none shrink-0 ${
         isDragging ? 'cursor-grabbing' : 'cursor-pointer'
       }`}
+      style={{ height: totalHeight }}
       onPointerDown={handlePointerDown}
       role="slider"
       aria-label="Telemetry graphs"

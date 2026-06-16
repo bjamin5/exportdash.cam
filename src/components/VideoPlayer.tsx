@@ -1077,8 +1077,8 @@ export function VideoPlayer({
       {/* Video Container with Overlays */}
       <div
         ref={videoContainerRef}
-        className={`relative bg-black rounded-xl overflow-hidden flex items-center justify-center ${
-          isFullscreen ? 'flex-1' : isPortraitFormat ? 'h-[60vh] self-center' : 'max-h-[60vh]'
+        className={`relative shrink-0 bg-black rounded-xl overflow-hidden flex items-center justify-center ${
+          isFullscreen ? 'flex-1 min-h-0' : isPortraitFormat ? 'h-[60vh] self-center' : 'max-h-[60vh]'
         }`}
         style={isPortraitFormat ? { aspectRatio: `${formatPreset.aspectRatio}` } : undefined}
       >
@@ -1182,6 +1182,7 @@ export function VideoPlayer({
 
       {/* Telemetry Graphs - below video (when mode is "below") */}
       {showGraphsBelowPlayer && totalDuration > 0 && (
+        <div className="shrink-0">
         <TelemetryGraphs
           allSeiMessages={allSeiMessages}
           fps={fps}
@@ -1196,6 +1197,7 @@ export function VideoPlayer({
           isTrimming={isTrimming}
           displayConfig={telemetryDisplayConfig}
         />
+        </div>
       )}
 
       {/* Controls Area - Scrollable if needed */}
