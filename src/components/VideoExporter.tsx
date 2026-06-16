@@ -946,7 +946,7 @@ export function VideoExporter({
                     speedUnit,
                     graphVisibilityFromConfig(telemetryDisplayConfig),
                     true,
-                    telemetryDisplayConfig.graphGMax ?? 0
+                    rowH
                   );
                 }
               } else if (slotIdx === MAP_SLOT) {
@@ -1159,7 +1159,7 @@ export function VideoExporter({
               speedUnit,
               graphVisibilityFromConfig(telemetryDisplayConfig),
               true,
-              telemetryDisplayConfig.graphGMax ?? 0
+              dashH
             );
           } else {
             ctx.drawImage(tempVideo, 0, 0, width, height);
@@ -1203,7 +1203,7 @@ export function VideoExporter({
             speedUnit,
             graphVisibilityFromConfig(telemetryDisplayConfig),
             true,
-            telemetryDisplayConfig.graphGMax ?? 0
+            dashH
           );
         }
 
@@ -1244,7 +1244,7 @@ export function VideoExporter({
                 speedUnit,
                 graphVisibilityFromConfig(telemetryDisplayConfig),
                 true,
-                telemetryDisplayConfig.graphGMax ?? 0
+                pipH
               );
             }
           }

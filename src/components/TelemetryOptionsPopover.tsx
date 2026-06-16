@@ -19,11 +19,9 @@ interface TelemetryOptionsPopoverProps {
 
 const MODES: TelemetryMode[] = ['overlay-top', 'overlay-bottom', 'split', 'below'];
 
-type TelemetryToggleKey = Exclude<keyof TelemetryDisplayConfig, 'graphGMax'>;
-
 const TOGGLE_GROUPS: Array<{
   title: string;
-  items: Array<{ key: TelemetryToggleKey; label: string }>;
+  items: Array<{ key: keyof TelemetryDisplayConfig; label: string }>;
 }> = [
   {
     title: 'HUD',
@@ -46,16 +44,6 @@ const TOGGLE_GROUPS: Array<{
       { key: 'showGraphSpeed', label: 'Speed' },
     ],
   },
-];
-
-const GRAPH_G_PRESETS = [
-  { label: 'Auto', value: 0 },
-  { label: '0.15G', value: 0.15 },
-  { label: '0.25G', value: 0.25 },
-  { label: '0.35G', value: 0.35 },
-  { label: '0.5G', value: 0.5 },
-  { label: '0.75G', value: 0.75 },
-  { label: '1.0G', value: 1.0 },
 ];
 
 function ToggleRow({
@@ -108,7 +96,7 @@ export function TelemetryOptionsPopover({
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose]);
 
-  const setField = (key: TelemetryToggleKey, value: boolean) => {
+  const setField = (key: keyof TelemetryDisplayConfig, value: boolean) => {
     onDisplayConfigChange({ ...displayConfig, [key]: value });
   };
 
@@ -170,31 +158,6 @@ export function TelemetryOptionsPopover({
           </div>
         </div>
       ))}
-
-      <div className="px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
-          G-Force Scale
-        </span>
-        <p className="text-[10px] text-gray-500 mt-1 mb-2">
-          Lower values make spikes more dramatic. Auto fits to your clip.
-        </p>
-        <div className="flex flex-wrap gap-1">
-          {GRAPH_G_PRESETS.map((preset) => (
-            <button
-              key={preset.label}
-              type="button"
-              onClick={() => onDisplayConfigChange({ ...displayConfig, graphGMax: preset.value })}
-              className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                displayConfig.graphGMax === preset.value
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-              }`}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

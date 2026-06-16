@@ -41,14 +41,12 @@ export function seiMessagesToGraphPoints(
   }));
 }
 
-export function computeGraphRanges(points: GraphPoint[], manualGMax = 0): GraphRanges {
+export function computeGraphRanges(points: GraphPoint[]): GraphRanges {
   const longValues = points.map((p) => p.longG);
   const latValues = points.map((p) => p.latG);
   const speedValues = points.map((p) => p.speed);
-  const autoLongMax = Math.max(0.3, ...longValues.map(Math.abs), 0.1);
-  const autoLatMax = Math.max(0.2, ...latValues.map(Math.abs), 0.1);
-  const longMax = manualGMax > 0 ? manualGMax : Math.max(0.5, autoLongMax);
-  const latMax = manualGMax > 0 ? manualGMax : Math.max(0.5, autoLatMax);
+  const longMax = Math.max(0.5, ...longValues.map(Math.abs), 0.3);
+  const latMax = Math.max(0.5, ...latValues.map(Math.abs), 0.2);
   const speedMax = Math.max(10, ...speedValues, 40);
   return {
     long: { min: -longMax, max: longMax },
@@ -101,7 +99,7 @@ export function graphVisibilityFromConfig(config: TelemetryDisplayConfig): Graph
   };
 }
 
-export function getChartLayout(compact: boolean, visibility: GraphVisibility) {
+export function getChartLayout(compact: boolean, visibility: GraphVisibility, targetTotalHeight?: number) {
   const scale = compact ? 0.6 : 1;
   const charts: Array<{ key: keyof GraphVisibility; height: number; color: string; top: string; bottom: string }> = [];
   if (visibility.showLong) {
@@ -113,8 +111,20 @@ export function getChartLayout(compact: boolean, visibility: GraphVisibility) {
   if (visibility.showSpeed) {
     charts.push({ key: 'showSpeed', height: Math.round(56 * scale), color: '#a855f7', top: 'SPEED', bottom: '' });
   }
-  const chartsHeight = charts.reduce((sum, c) => sum + c.height, 0);
-  const totalHeight = chartsHeight + GRAPH_PADDING.top + GRAPH_PADDING.bottom;
+  const padding = GRAPH_PADDING.top + GRAPH_PADDING.bottom;
+  let chartsHeight = charts.reduce((sum, c) => sum + c.height, 0);
+  let totalHeight = chartsHeight + padding;
+
+  if (targetTotalHeight && targetTotalHeight > totalHeight && chartsHeight > 0) {
+    const targetChartsHeight = targetTotalHeight - padding;
+    const heightScale = targetChartsHeight / chartsHeight;
+    charts.forEach((chart) => {
+      chart.height = Math.max(20, Math.round(chart.height * heightScale));
+    });
+    chartsHeight = charts.reduce((sum, c) => sum + c.height, 0);
+    totalHeight = chartsHeight + padding;
+  }
+
   return { charts, totalHeight, chartsHeight };
 }
 
@@ -143,6 +153,7 @@ export function setupCanvas(
 interface DrawChartsOptions {
   visibility: GraphVisibility;
   compact?: boolean;
+  layoutHeight?: number;
   showPlayhead?: boolean;
   displayTime?: number;
   viewStart: number;
@@ -158,8 +169,8 @@ export function drawTelemetryCharts(
   speedUnit: 'mph' | 'kmh',
   options: DrawChartsOptions
 ) {
-  const { visibility, compact = false, showPlayhead = false, displayTime = 0, viewStart, viewEnd } = options;
-  const { charts, totalHeight } = getChartLayout(compact, visibility);
+  const { visibility, compact = false, layoutHeight, showPlayhead = false, displayTime = 0, viewStart, viewEnd } = options;
+  const { charts, totalHeight } = getChartLayout(compact, visibility, layoutHeight);
   if (charts.length === 0) return;
 
   ctx.clearRect(0, 0, width, totalHeight);
@@ -361,21 +372,21 @@ export function drawTelemetryChartsInBounds(
   speedUnit: 'mph' | 'kmh',
   visibility: GraphVisibility,
   compact = true,
-  manualGMax = 0
+  layoutHeight?: number
 ) {
   const visible = allPoints.filter((p) => p.time >= viewStart && p.time <= viewEnd);
   if (visible.length === 0) return;
 
-  const ranges = computeGraphRanges(visible, manualGMax);
+  const ranges = computeGraphRanges(visible);
   const viewDuration = Math.max(viewEnd - viewStart, 0.001);
-  const { totalHeight } = getChartLayout(compact, visibility);
+  const targetHeight = layoutHeight ?? Math.floor(bounds.h);
+  const { totalHeight } = getChartLayout(compact, visibility, targetHeight);
   if (totalHeight <= 0 || bounds.w <= 0 || bounds.h <= 0) return;
 
   const renderW = Math.max(1, Math.floor(bounds.w));
   const renderH = Math.max(1, Math.floor(totalHeight));
-  const heightScale = Math.min(1, bounds.h / renderH);
   const destW = Math.floor(bounds.w);
-  const destH = Math.floor(renderH * heightScale);
+  const destH = Math.min(Math.floor(bounds.h), renderH);
   const offsetY = bounds.y + Math.floor((bounds.h - destH) / 2);
 
   const offscreen = typeof document !== 'undefined' ? document.createElement('canvas') : null;
@@ -390,6 +401,7 @@ export function drawTelemetryChartsInBounds(
   drawTelemetryCharts(offCtx, renderW, drawPoints, ranges, viewDuration, speedUnit, {
     visibility,
     compact,
+    layoutHeight: destH,
     showPlayhead: true,
     displayTime,
     viewStart,

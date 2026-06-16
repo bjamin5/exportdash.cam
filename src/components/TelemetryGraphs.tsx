@@ -32,6 +32,7 @@ interface TelemetryGraphsProps {
   isTrimming?: boolean;
   displayConfig?: TelemetryDisplayConfig;
   compact?: boolean;
+  fillHeight?: boolean;
 }
 
 export function TelemetryGraphs({
@@ -48,16 +49,19 @@ export function TelemetryGraphs({
   isTrimming = false,
   displayConfig = DEFAULT_TELEMETRY_DISPLAY_CONFIG,
   compact = false,
+  fillHeight = false,
 }: TelemetryGraphsProps) {
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [width, setWidth] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
 
   const syncAnchorRef = useRef({ time: currentTime, at: performance.now() });
   const renderStateRef = useRef({
     width: 0,
+    totalHeight: 0,
     ranges: null as ReturnType<typeof computeGraphRanges> | null,
     drawPoints: [] as ReturnType<typeof seiMessagesToGraphPoints>,
     viewStart: 0,
@@ -70,7 +74,6 @@ export function TelemetryGraphs({
     currentTime: 0,
     visibility: graphVisibilityFromConfig(displayConfig),
     compact: false,
-    totalHeight: 0,
   });
 
   const visibility = useMemo(
@@ -92,14 +95,13 @@ export function TelemetryGraphs({
     [allPoints, viewStart, viewEnd]
   );
 
-  const ranges = useMemo(
-    () => computeGraphRanges(visiblePoints, displayConfig.graphGMax ?? 0),
-    [visiblePoints, displayConfig.graphGMax]
-  );
-  const { totalHeight } = useMemo(
-    () => getChartLayout(compact, visibility),
-    [compact, visibility]
-  );
+  const ranges = useMemo(() => computeGraphRanges(visiblePoints), [visiblePoints]);
+
+  const layoutHeight = fillHeight && containerHeight > 0
+    ? containerHeight
+    : getChartLayout(compact, visibility).totalHeight;
+
+  const totalHeight = layoutHeight;
 
   useEffect(() => {
     syncAnchorRef.current = { time: currentTime, at: performance.now() };
@@ -146,16 +148,21 @@ export function TelemetryGraphs({
     const el = containerRef.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
-      if (entries[0]) setWidth(entries[0].contentRect.width);
+      const entry = entries[0];
+      if (!entry) return;
+      setWidth(entry.contentRect.width);
+      setContainerHeight(entry.contentRect.height);
     });
     observer.observe(el);
     setWidth(el.clientWidth);
+    setContainerHeight(el.clientHeight);
     return () => observer.disconnect();
-  }, []);
+  }, [fillHeight]);
 
   useEffect(() => {
     renderStateRef.current = {
       width,
+      totalHeight,
       ranges,
       drawPoints: downsample(visiblePoints, Math.max((width - GRAPH_PADDING.left - GRAPH_PADDING.right) * 2, 200)),
       viewStart,
@@ -168,12 +175,22 @@ export function TelemetryGraphs({
       currentTime,
       visibility,
       compact,
-      totalHeight,
     };
   }, [
-    width, ranges, visiblePoints, viewStart, viewEnd, viewDuration, speedUnit,
-    isPlaying, isDragging, playbackRate, currentTime, visibility, compact, totalHeight,
+    width, totalHeight, ranges, visiblePoints, viewStart, viewEnd, viewDuration, speedUnit,
+    isPlaying, isDragging, playbackRate, currentTime, visibility, compact,
   ]);
+
+  const drawOptions = useMemo(
+    () => ({
+      visibility,
+      compact,
+      layoutHeight: fillHeight ? totalHeight : undefined,
+      viewStart,
+      viewEnd,
+    }),
+    [visibility, compact, fillHeight, totalHeight, viewStart, viewEnd]
+  );
 
   useEffect(() => {
     const canvas = bgCanvasRef.current;
@@ -183,13 +200,10 @@ export function TelemetryGraphs({
     const chartWidth = width - GRAPH_PADDING.left - GRAPH_PADDING.right;
     const drawPoints = downsample(visiblePoints, Math.max(chartWidth * 2, 200));
     drawTelemetryCharts(ctx, width, drawPoints, ranges, viewDuration, speedUnit, {
-      visibility,
-      compact,
+      ...drawOptions,
       showPlayhead: false,
-      viewStart,
-      viewEnd,
     });
-  }, [width, visiblePoints, ranges, viewStart, viewEnd, viewDuration, speedUnit, visibility, compact, totalHeight]);
+  }, [width, visiblePoints, ranges, viewDuration, speedUnit, drawOptions, totalHeight]);
 
   const drawPlayheadOverlay = useCallback(() => {
     const state = renderStateRef.current;
@@ -213,12 +227,13 @@ export function TelemetryGraphs({
     drawTelemetryCharts(ctx, state.width, state.drawPoints, state.ranges, state.viewDuration, state.speedUnit, {
       visibility: state.visibility,
       compact: state.compact,
+      layoutHeight: fillHeight ? state.totalHeight : undefined,
       showPlayhead: true,
       displayTime,
       viewStart: state.viewStart,
       viewEnd: state.viewEnd,
     });
-  }, []);
+  }, [fillHeight]);
 
   useEffect(() => {
     const canvas = overlayCanvasRef.current;
@@ -255,17 +270,20 @@ export function TelemetryGraphs({
     }
   }, [currentTime, isPlaying, isDragging, drawPlayheadOverlay, ranges, visiblePoints]);
 
-  if (duration <= 0 || allPoints.length === 0 || totalHeight <= 0) {
+  if (duration <= 0 || allPoints.length === 0) {
     return null;
   }
+
+  const baseHeight = getChartLayout(compact, visibility).totalHeight;
+  if (!fillHeight && baseHeight <= 0) return null;
 
   return (
     <div
       ref={containerRef}
-      className={`relative bg-black rounded-xl overflow-hidden select-none shrink-0 ${
-        isDragging ? 'cursor-grabbing' : 'cursor-pointer'
-      }`}
-      style={{ height: totalHeight }}
+      className={`relative bg-black overflow-hidden select-none ${
+        fillHeight ? 'h-full w-full' : 'shrink-0 rounded-xl'
+      } ${isDragging ? 'cursor-grabbing' : 'cursor-pointer'}`}
+      style={fillHeight ? undefined : { height: totalHeight }}
       onPointerDown={handlePointerDown}
       role="slider"
       aria-label="Telemetry graphs"
@@ -273,11 +291,10 @@ export function TelemetryGraphs({
       aria-valuemax={viewEnd}
       aria-valuenow={currentTime}
     >
-      <canvas ref={bgCanvasRef} className="block w-full" style={{ height: totalHeight }} />
+      <canvas ref={bgCanvasRef} className="block w-full h-full" />
       <canvas
         ref={overlayCanvasRef}
-        className="absolute inset-0 block w-full pointer-events-none"
-        style={{ height: totalHeight }}
+        className="absolute inset-0 block w-full h-full pointer-events-none"
       />
     </div>
   );

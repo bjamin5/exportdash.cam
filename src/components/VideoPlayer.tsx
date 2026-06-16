@@ -223,9 +223,11 @@ export function VideoPlayer({
   }, []);
 
   const handlePortraitLayoutChange = useCallback((newLayout: PortraitLayoutType) => {
+    if (newLayout === portraitLayout) return;
+    pendingRestoreRef.current = { time: localTime, playing: isPlaying };
     setPortraitLayout(newLayout);
     savePortraitLayout(newLayout);
-  }, []);
+  }, [portraitLayout, localTime, isPlaying]);
 
   const handlePortraitSlotChange = useCallback((slotIdx: number, newAngle: string) => {
     setPortraitCameraConfig(prev => {
@@ -241,6 +243,12 @@ export function VideoPlayer({
       return updated;
     });
   }, [portraitLayout]);
+
+  const handleFormatChange = useCallback((newFormat: FormatType) => {
+    if (newFormat === format) return;
+    pendingRestoreRef.current = { time: localTime, playing: isPlaying };
+    setFormat(newFormat);
+  }, [format, localTime, isPlaying]);
 
   const handlePortraitAlignChange = useCallback((slotIdx: number, align: AlignPosition) => {
     setPortraitAlignConfig(prev => {
@@ -770,7 +778,7 @@ export function VideoPlayer({
     );
   };
 
-  const renderTelemetryDashboard = (options?: { compact?: boolean; showHud?: boolean; showGraphs?: boolean; className?: string }) => (
+  const renderTelemetryDashboard = (options?: { compact?: boolean; showHud?: boolean; showGraphs?: boolean; fillGraphHeight?: boolean; className?: string }) => (
     <TelemetryDashboard
       seiData={seiData}
       isLoading={isLoading}
@@ -791,6 +799,7 @@ export function VideoPlayer({
       compact={options?.compact}
       showHud={options?.showHud}
       showGraphs={options?.showGraphs}
+      fillGraphHeight={options?.fillGraphHeight}
       className={options?.className ?? 'w-full h-full'}
     />
   );
@@ -801,7 +810,7 @@ export function VideoPlayer({
       <div className="flex flex-col w-full h-full">
         <div className="flex-[3] min-h-0 relative overflow-hidden">{content}</div>
         <div className="flex-[2] min-h-0 border-t border-gray-800">
-          {renderTelemetryDashboard({ compact: true, showHud: false })}
+          {renderTelemetryDashboard({ compact: true, showHud: false, fillGraphHeight: true })}
         </div>
       </div>
     );
@@ -816,7 +825,7 @@ export function VideoPlayer({
       const hasGps = !!(mapSeiData?.latitude_deg && mapSeiData?.longitude_deg);
 
       return (
-        <div className="relative w-full h-full bg-black overflow-hidden flex flex-col">
+        <div className="absolute inset-0 bg-black overflow-hidden flex flex-col">
           {layoutMeta.grid.map((row, rowIdx) => (
             <div
               key={rowIdx}
@@ -829,7 +838,7 @@ export function VideoPlayer({
                   return (
                     <div key={colIdx} className="relative flex-1 bg-black overflow-hidden isolate z-10">
                       {showTelemetry ? (
-                        renderTelemetryDashboard({ compact: true, showHud: false })
+                        renderTelemetryDashboard({ compact: true, showHud: false, fillGraphHeight: true })
                       ) : (
                         <span className="text-gray-600 text-xs flex items-center justify-center h-full">Telemetry</span>
                       )}
@@ -1075,12 +1084,20 @@ export function VideoPlayer({
       {/* Video Container with Overlays */}
       <div
         ref={videoContainerRef}
-        className={`relative shrink-0 bg-black rounded-xl overflow-hidden flex items-center justify-center ${
-          isFullscreen ? 'flex-1 min-h-0' : isPortraitFormat ? 'h-[60vh] self-center' : 'max-h-[60vh]'
+        className={`relative shrink-0 bg-black rounded-xl overflow-hidden ${
+          isFullscreen ? 'flex-1 min-h-0 w-full' : 'w-full max-h-[60vh] mx-auto'
         }`}
-        style={isPortraitFormat ? { aspectRatio: `${formatPreset.aspectRatio}` } : undefined}
+        style={
+          isFullscreen
+            ? undefined
+            : isPortraitFormat
+              ? { aspectRatio: `${formatPreset.aspectRatio}`, maxHeight: '60vh' }
+              : { aspectRatio: '16 / 9', maxHeight: '60vh' }
+        }
       >
-        {renderVideoGrid()}
+        <div className="absolute inset-0">
+          {renderVideoGrid()}
+        </div>
 
         {/* Overlay anchor - matches visible video area */}
         <div
@@ -1114,7 +1131,7 @@ export function VideoPlayer({
             {/* Telemetry dashboard - bottom overlay */}
             {showDashboardOverlayBottom && (
               <div className="absolute bottom-0 left-0 right-0 pointer-events-auto max-h-[45%]">
-                {renderTelemetryDashboard({ compact: true, showHud: false })}
+                {renderTelemetryDashboard({ compact: true, showHud: false, fillGraphHeight: true })}
               </div>
             )}
 
@@ -1453,7 +1470,7 @@ export function VideoPlayer({
             {FORMAT_PRESETS.map((f) => (
               <Tooltip key={f.id} content={f.label} position="top">
                 <button
-                  onClick={() => setFormat(f.id)}
+                  onClick={() => handleFormatChange(f.id)}
                   className={`p-1.5 rounded text-xs font-medium transition-all ${
                     format === f.id
                       ? 'bg-blue-600 text-white'

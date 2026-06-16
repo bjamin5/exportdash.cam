@@ -285,8 +285,6 @@ export interface TelemetryDisplayConfig {
   showSteering: boolean;
   showAccelerator: boolean;
   showAutopilot: boolean;
-  /** Max G for longitudinal/lateral axes (0 = auto-fit to data). Lower = more dramatic spikes. */
-  graphGMax: number;
 }
 
 export const DEFAULT_TELEMETRY_DISPLAY_CONFIG: TelemetryDisplayConfig = {
@@ -301,7 +299,6 @@ export const DEFAULT_TELEMETRY_DISPLAY_CONFIG: TelemetryDisplayConfig = {
   showSteering: true,
   showAccelerator: true,
   showAutopilot: true,
-  graphGMax: 0,
 };
 
 /** How telemetry is composed into the video frame */
@@ -325,11 +322,7 @@ export function loadTelemetryDisplayConfig(): TelemetryDisplayConfig {
     const stored = localStorage.getItem(TELEMETRY_CONFIG_KEY);
     if (!stored) return { ...DEFAULT_TELEMETRY_DISPLAY_CONFIG };
     const parsed = JSON.parse(stored) as Partial<TelemetryDisplayConfig>;
-    return {
-      ...DEFAULT_TELEMETRY_DISPLAY_CONFIG,
-      ...parsed,
-      graphGMax: typeof parsed.graphGMax === 'number' ? parsed.graphGMax : 0,
-    };
+    return { ...DEFAULT_TELEMETRY_DISPLAY_CONFIG, ...parsed };
   } catch {
     return { ...DEFAULT_TELEMETRY_DISPLAY_CONFIG };
   }

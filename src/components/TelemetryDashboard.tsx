@@ -26,6 +26,7 @@ interface TelemetryDashboardProps {
   showHud?: boolean;
   showGraphs?: boolean;
   className?: string;
+  fillGraphHeight?: boolean;
 }
 
 export function TelemetryDashboard({
@@ -49,6 +50,7 @@ export function TelemetryDashboard({
   showHud = true,
   showGraphs = true,
   className = '',
+  fillGraphHeight = false,
 }: TelemetryDashboardProps) {
   const hasHud = showHud && displayConfig.showHud;
   const hasGraphs =
@@ -96,6 +98,7 @@ export function TelemetryDashboard({
             isTrimming={isTrimming}
             displayConfig={displayConfig}
             compact={compact}
+            fillHeight={fillGraphHeight}
           />
         </div>
       )}
