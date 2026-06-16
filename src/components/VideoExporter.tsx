@@ -933,27 +933,20 @@ export function VideoExporter({
 
               if (slotIdx === TELEMETRY_SLOT) {
                 if (showTelemetry) {
-                  const viewStart = trimPoints?.inPoint ?? 0;
-                  const viewEnd = trimPoints?.outPoint ?? sequence.totalDuration;
-                  const graphPoints = seiMessagesToGraphPoints(allSeiMessages, exportFps, speedUnit);
-                  const slotSei = getSeiForTime(absoluteTime);
-                  const hudOffset = telemetryDisplayConfig.showHud ? Math.min(70, Math.floor(rowH * 0.35)) : 0;
-                  if (telemetryDisplayConfig.showHud && slotSei) {
-                    ctx.save();
-                    ctx.translate(curX, curY);
-                    drawTelemetry(ctx, slotSei, cellW, rowH, telemetryIcons, { position: 'top' });
-                    ctx.restore();
-                  }
+                  const viewStart = exportStart;
+                  const viewEnd = exportEnd;
+                  const graphPoints = seiMessagesToGraphPoints(allSeiMessages, fps, speedUnit);
                   drawTelemetryChartsInBounds(
                     ctx,
-                    { x: curX, y: curY + hudOffset, w: cellW, h: rowH - hudOffset },
+                    { x: curX, y: curY, w: cellW, h: rowH },
                     graphPoints,
                     absoluteTime,
                     viewStart,
                     viewEnd,
                     speedUnit,
                     graphVisibilityFromConfig(telemetryDisplayConfig),
-                    true
+                    true,
+                    telemetryDisplayConfig.graphGMax ?? 0
                   );
                 }
               } else if (slotIdx === MAP_SLOT) {
@@ -1144,38 +1137,34 @@ export function VideoExporter({
           await seekVideo(localTime);
           await new Promise((r) => setTimeout(r, 10));
 
-          const portraitHasTelemetrySlot = isPortraitFormat && portraitLayoutHasTelemetry(portraitLayout);
           const useSplitExport = showTelemetry && telemetryMode === 'split' && !isPortraitFormat;
 
           if (useSplitExport) {
             const videoH = Math.floor(height * 0.6);
             ctx.drawImage(tempVideo, 0, 0, width, videoH);
-            const viewStart = trimPoints?.inPoint ?? 0;
-            const viewEnd = trimPoints?.outPoint ?? sequence.totalDuration;
-            const graphPoints = seiMessagesToGraphPoints(allSeiMessages, exportFps, speedUnit);
+            const viewStart = exportStart;
+            const viewEnd = exportEnd;
+            const graphPoints = seiMessagesToGraphPoints(allSeiMessages, fps, speedUnit);
             const dashY = videoH;
             const dashH = height - videoH;
             ctx.fillStyle = '#000';
             ctx.fillRect(0, dashY, width, dashH);
-            if (telemetryDisplayConfig.showHud) {
-              drawTelemetry(ctx, getSeiForTime(absoluteTime), width, dashY + dashH, telemetryIcons, { position: 'top' });
-            }
             drawTelemetryChartsInBounds(
               ctx,
-              { x: 0, y: dashY + (telemetryDisplayConfig.showHud ? 60 : 0), w: width, h: dashH - (telemetryDisplayConfig.showHud ? 60 : 0) },
+              { x: 0, y: dashY, w: width, h: dashH },
               graphPoints,
               absoluteTime,
               viewStart,
               viewEnd,
               speedUnit,
               graphVisibilityFromConfig(telemetryDisplayConfig),
-              true
+              true,
+              telemetryDisplayConfig.graphGMax ?? 0
             );
           } else {
             ctx.drawImage(tempVideo, 0, 0, width, height);
           }
 
-          void portraitHasTelemetrySlot;
         }
 
         // Get SEI data for this absolute time, with event.json GPS fallback
@@ -1189,17 +1178,12 @@ export function VideoExporter({
         // Draw overlays based on toggle states
         const overlayW = width;
         const overlayH = height;
-        const portraitHasTelemetrySlot = isPortraitFormat && portraitLayoutHasTelemetry(portraitLayout);
-        const showHudOverlayTop =
-          showTelemetry &&
-          telemetryDisplayConfig.showHud &&
-          (telemetryMode === 'overlay-top' || telemetryMode === 'below') &&
-          !portraitHasTelemetrySlot;
+        const showHudOverlayTop = showTelemetry && telemetryDisplayConfig.showHud;
         const showDashboardOverlayBottom =
-          showTelemetry && telemetryMode === 'overlay-bottom' && !portraitHasTelemetrySlot;
-        const viewStart = trimPoints?.inPoint ?? 0;
-        const viewEnd = trimPoints?.outPoint ?? sequence.totalDuration;
-        const graphPoints = seiMessagesToGraphPoints(allSeiMessages, exportFps, speedUnit);
+          showTelemetry && telemetryMode === 'overlay-bottom' && !isPortraitFormat;
+        const viewStart = exportStart;
+        const viewEnd = exportEnd;
+        const graphPoints = seiMessagesToGraphPoints(allSeiMessages, fps, speedUnit);
 
         if (showHudOverlayTop) {
           drawTelemetry(ctx, seiData, overlayW, overlayH, telemetryIcons, { showHud: telemetryDisplayConfig.showHud });
@@ -1207,22 +1191,19 @@ export function VideoExporter({
 
         if (showDashboardOverlayBottom) {
           const dashH = Math.floor(overlayH * 0.38);
-          const hudOffset = telemetryDisplayConfig.showHud ? 64 : 0;
           ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
           ctx.fillRect(0, overlayH - dashH, overlayW, dashH);
-          if (telemetryDisplayConfig.showHud) {
-            drawTelemetry(ctx, seiData, overlayW, overlayH, telemetryIcons, { position: 'bottom', showHud: true });
-          }
           drawTelemetryChartsInBounds(
             ctx,
-            { x: 0, y: overlayH - dashH + hudOffset, w: overlayW, h: dashH - hudOffset },
+            { x: 0, y: overlayH - dashH, w: overlayW, h: dashH },
             graphPoints,
             absoluteTime,
             viewStart,
             viewEnd,
             speedUnit,
             graphVisibilityFromConfig(telemetryDisplayConfig),
-            true
+            true,
+            telemetryDisplayConfig.graphGMax ?? 0
           );
         }
 
@@ -1262,7 +1243,8 @@ export function VideoExporter({
                 viewEnd,
                 speedUnit,
                 graphVisibilityFromConfig(telemetryDisplayConfig),
-                true
+                true,
+                telemetryDisplayConfig.graphGMax ?? 0
               );
             }
           }
@@ -1329,7 +1311,7 @@ export function VideoExporter({
       }
       tempVideo.src = '';
     }
-  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig, format, portraitLayout, portraitCameraConfig, portraitAlignConfig]);
+  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig, format, portraitLayout, portraitCameraConfig, portraitAlignConfig, telemetryDisplayConfig, telemetryMode]);
 
   const stopExport = useCallback(() => {
     abortRef.current = true;

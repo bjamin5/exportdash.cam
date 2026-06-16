@@ -92,7 +92,10 @@ export function TelemetryGraphs({
     [allPoints, viewStart, viewEnd]
   );
 
-  const ranges = useMemo(() => computeGraphRanges(visiblePoints), [visiblePoints]);
+  const ranges = useMemo(
+    () => computeGraphRanges(visiblePoints, displayConfig.graphGMax ?? 0),
+    [visiblePoints, displayConfig.graphGMax]
+  );
   const { totalHeight } = useMemo(
     () => getChartLayout(compact, visibility),
     [compact, visibility]
@@ -188,51 +191,69 @@ export function TelemetryGraphs({
     });
   }, [width, visiblePoints, ranges, viewStart, viewEnd, viewDuration, speedUnit, visibility, compact, totalHeight]);
 
+  const drawPlayheadOverlay = useCallback(() => {
+    const state = renderStateRef.current;
+    const overlay = overlayCanvasRef.current;
+    if (!overlay || state.width <= 0 || !state.ranges || state.totalHeight <= 0) return;
+
+    const ctx = overlay.getContext('2d');
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    let displayTime = state.currentTime;
+    if (state.isPlaying && !state.isDragging) {
+      const elapsed = (performance.now() - syncAnchorRef.current.at) / 1000;
+      displayTime = Math.min(
+        state.viewEnd,
+        syncAnchorRef.current.time + elapsed * state.playbackRate
+      );
+    }
+
+    drawTelemetryCharts(ctx, state.width, state.drawPoints, state.ranges, state.viewDuration, state.speedUnit, {
+      visibility: state.visibility,
+      compact: state.compact,
+      showPlayhead: true,
+      displayTime,
+      viewStart: state.viewStart,
+      viewEnd: state.viewEnd,
+    });
+  }, []);
+
   useEffect(() => {
     const canvas = overlayCanvasRef.current;
     if (!canvas || width <= 0 || totalHeight <= 0) return;
     setupCanvas(canvas, width, totalHeight);
 
     let frameId = 0;
+    let running = true;
+
     const renderOverlay = () => {
+      if (!running) return;
+      drawPlayheadOverlay();
       const state = renderStateRef.current;
-      const overlay = overlayCanvasRef.current;
-      if (!overlay || state.width <= 0 || !state.ranges || state.totalHeight <= 0) {
-        frameId = requestAnimationFrame(renderOverlay);
-        return;
-      }
-      const ctx = overlay.getContext('2d');
-      if (!ctx) {
-        frameId = requestAnimationFrame(renderOverlay);
-        return;
-      }
-      const dpr = window.devicePixelRatio || 1;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      let displayTime = state.currentTime;
       if (state.isPlaying && !state.isDragging) {
-        const elapsed = (performance.now() - syncAnchorRef.current.at) / 1000;
-        displayTime = Math.min(
-          state.viewEnd,
-          syncAnchorRef.current.time + elapsed * state.playbackRate
-        );
+        frameId = requestAnimationFrame(renderOverlay);
       }
-
-      drawTelemetryCharts(ctx, state.width, state.drawPoints, state.ranges, state.viewDuration, state.speedUnit, {
-        visibility: state.visibility,
-        compact: state.compact,
-        showPlayhead: true,
-        displayTime,
-        viewStart: state.viewStart,
-        viewEnd: state.viewEnd,
-      });
-
-      frameId = requestAnimationFrame(renderOverlay);
     };
 
-    frameId = requestAnimationFrame(renderOverlay);
-    return () => cancelAnimationFrame(frameId);
-  }, [width, totalHeight]);
+    drawPlayheadOverlay();
+    const state = renderStateRef.current;
+    if (state.isPlaying && !state.isDragging) {
+      frameId = requestAnimationFrame(renderOverlay);
+    }
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(frameId);
+    };
+  }, [width, totalHeight, isPlaying, isDragging, drawPlayheadOverlay]);
+
+  useEffect(() => {
+    if (!isPlaying || isDragging) {
+      drawPlayheadOverlay();
+    }
+  }, [currentTime, isPlaying, isDragging, drawPlayheadOverlay, ranges, visiblePoints]);
 
   if (duration <= 0 || allPoints.length === 0 || totalHeight <= 0) {
     return null;

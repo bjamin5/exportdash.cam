@@ -285,12 +285,8 @@ export function VideoPlayer({
   );
 
   const showHudOverlayTop = useMemo(
-    () =>
-      showTelemetry &&
-      telemetryDisplayConfig.showHud &&
-      (telemetryMode === 'overlay-top' || telemetryMode === 'below') &&
-      !portraitHasTelemetrySlot,
-    [showTelemetry, telemetryDisplayConfig.showHud, telemetryMode, portraitHasTelemetrySlot]
+    () => showTelemetry && telemetryDisplayConfig.showHud,
+    [showTelemetry, telemetryDisplayConfig.showHud]
   );
 
   const showDashboardOverlayBottom = useMemo(
@@ -805,7 +801,7 @@ export function VideoPlayer({
       <div className="flex flex-col w-full h-full">
         <div className="flex-[3] min-h-0 relative overflow-hidden">{content}</div>
         <div className="flex-[2] min-h-0 border-t border-gray-800">
-          {renderTelemetryDashboard({ compact: true })}
+          {renderTelemetryDashboard({ compact: true, showHud: false })}
         </div>
       </div>
     );
@@ -831,9 +827,9 @@ export function VideoPlayer({
                 // Telemetry dashboard slot
                 if (slotIdx === TELEMETRY_SLOT) {
                   return (
-                    <div key={colIdx} className="relative flex-1 bg-black overflow-hidden isolate z-0">
+                    <div key={colIdx} className="relative flex-1 bg-black overflow-hidden isolate z-10">
                       {showTelemetry ? (
-                        renderTelemetryDashboard({ compact: true })
+                        renderTelemetryDashboard({ compact: true, showHud: false })
                       ) : (
                         <span className="text-gray-600 text-xs flex items-center justify-center h-full">Telemetry</span>
                       )}
@@ -866,24 +862,27 @@ export function VideoPlayer({
                 return (
                   <div key={colIdx} className="group relative flex-1 bg-black overflow-hidden">
                     {url && isAvailable ? (
-                      <video
-                        ref={(el) => {
-                          videoRefs.current[angle] = el;
-                          if (isMain) {
-                            (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
-                          }
-                        }}
-                        src={url}
-                        className="w-full h-full object-cover bg-black"
-                        style={{ objectPosition: slotAlign }}
-                        muted={!isMain}
-                        onTimeUpdate={isMain ? handleTimeUpdate : undefined}
-                        onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
-                        onEnded={isMain ? handleVideoEnded : undefined}
-                        onPlay={isMain ? () => setIsPlaying(true) : undefined}
-                        onPause={isMain ? () => setIsPlaying(false) : undefined}
-                        onClick={togglePlay}
-                      />
+                      <>
+                        <video
+                          ref={(el) => {
+                            videoRefs.current[angle] = el;
+                            if (isMain) {
+                              (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
+                            }
+                          }}
+                          src={url}
+                          className="w-full h-full object-cover bg-black"
+                          style={{ objectPosition: slotAlign }}
+                          muted={!isMain}
+                          onTimeUpdate={isMain ? handleTimeUpdate : undefined}
+                          onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
+                          onEnded={isMain ? handleVideoEnded : undefined}
+                          onPlay={isMain ? () => setIsPlaying(true) : undefined}
+                          onPause={isMain ? () => setIsPlaying(false) : undefined}
+                          onClick={togglePlay}
+                        />
+                        {isMain && renderPlayOverlay()}
+                      </>
                     ) : (
                       <div className="w-full h-full bg-gray-900 flex items-center justify-center text-gray-600 text-xs">
                         {ANGLE_LABELS[angle] || angle}
@@ -907,7 +906,6 @@ export function VideoPlayer({
               })}
             </div>
           ))}
-          {renderPlayOverlay()}
         </div>
       );
     }
@@ -1116,7 +1114,7 @@ export function VideoPlayer({
             {/* Telemetry dashboard - bottom overlay */}
             {showDashboardOverlayBottom && (
               <div className="absolute bottom-0 left-0 right-0 pointer-events-auto max-h-[45%]">
-                {renderTelemetryDashboard({ compact: true })}
+                {renderTelemetryDashboard({ compact: true, showHud: false })}
               </div>
             )}
 
