@@ -5,6 +5,7 @@ import { useSeiData } from '@/hooks/useSeiData';
 import { TelemetryCard } from './TelemetryCard';
 import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig, TelemetryDisplayConfig, DEFAULT_TELEMETRY_DISPLAY_CONFIG, TelemetryMode, loadTelemetryDisplayConfig, saveTelemetryDisplayConfig, loadTelemetryMode, saveTelemetryMode, MAP_SLOT, TELEMETRY_SLOT, isCamTelemetryLayout, CAM_TELEMETRY_LAYOUT, loadCamTelemetryRatio, saveCamTelemetryRatio, MIN_CAM_TELEMETRY_RATIO, MAX_CAM_TELEMETRY_RATIO } from '@/types/video';
 import { findMomentForTime, toAbsoluteTime } from '@/lib/sequence-detector';
+import { logPlayback, logPlaybackError, describeVideo } from '@/lib/playback-debug';
 import {
   IconArrowUp,
   IconArrowDown,
@@ -250,9 +251,16 @@ export function VideoPlayer({
 
   const handleFormatChange = useCallback((newFormat: FormatType) => {
     if (newFormat === format) return;
+    logPlayback('format changing', {
+      format: `${format} -> ${newFormat}`,
+      isPortraitFormat: getFormatPreset(newFormat).aspectRatio > 0 && getFormatPreset(newFormat).aspectRatio < 1,
+      portraitLayout,
+      isPlaying,
+      currentTime: localTime,
+    });
     pendingRestoreRef.current = { time: localTime, playing: isPlaying };
     setFormat(newFormat);
-  }, [format, localTime, isPlaying]);
+  }, [format, localTime, isPlaying, portraitLayout]);
 
   const handlePortraitAlignChange = useCallback((slotIdx: number, align: AlignPosition) => {
     setPortraitAlignConfig(prev => {
@@ -571,29 +579,152 @@ export function VideoPlayer({
     setTrimPoints(newTrimPoints);
   }, []);
 
+  const resolveMainAngle = useCallback((): string => {
+    if (isCamTelemetryLayoutActive) {
+      return portraitCameraConfig[CAM_TELEMETRY_LAYOUT]?.[0] || 'front';
+    }
+    if (isPortraitFormat && format !== 'original') {
+      const slots = portraitCameraConfig[portraitLayout] || DEFAULT_PORTRAIT_CAMERA_CONFIG[portraitLayout];
+      return slots?.[0] || selectedAngle;
+    }
+    return selectedAngle;
+  }, [isCamTelemetryLayoutActive, isPortraitFormat, format, portraitCameraConfig, portraitLayout, selectedAngle]);
+
   const getMainVideoElement = useCallback((): HTMLVideoElement | null => {
-    if (mainVideoRef.current) return mainVideoRef.current;
-    const camAngle = isCamTelemetryLayoutActive
-      ? (portraitCameraConfig[CAM_TELEMETRY_LAYOUT]?.[0] || selectedAngle)
-      : selectedAngle;
-    return videoRefs.current[camAngle] ?? videoRefs.current.front ?? Object.values(videoRefs.current).find(Boolean) ?? null;
-  }, [isCamTelemetryLayoutActive, portraitCameraConfig, selectedAngle]);
+    const preferredAngles = [
+      resolveMainAngle(),
+      selectedAngle,
+      'front',
+      ...Object.keys(videoRefs.current),
+    ];
+
+    for (const angle of preferredAngles) {
+      const candidate = videoRefs.current[angle];
+      if (candidate?.isConnected) {
+        (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = candidate;
+        return candidate;
+      }
+    }
+
+    if (mainVideoRef.current?.isConnected) {
+      return mainVideoRef.current;
+    }
+
+    (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = null;
+    return null;
+  }, [resolveMainAngle, selectedAngle]);
+
+  const attemptPlay = useCallback(async (video: HTMLVideoElement) => {
+    const snapshot = {
+      format,
+      isPortraitFormat,
+      portraitLayout,
+      isCamTelemetry: isCamTelemetryLayoutActive,
+      layout,
+      selectedAngle,
+      mainAngle: resolveMainAngle(),
+      ...describeVideo(video),
+    };
+
+    try {
+      if (video.readyState < 2) {
+        logPlayback('waiting for loadeddata before play', snapshot);
+        await new Promise<void>((resolve, reject) => {
+          if (video.readyState >= 2) {
+            resolve();
+            return;
+          }
+          const timeout = window.setTimeout(() => reject(new Error('loadeddata timeout')), 8000);
+          video.addEventListener('loadeddata', () => {
+            window.clearTimeout(timeout);
+            resolve();
+          }, { once: true });
+        });
+      }
+
+      await video.play();
+      Object.values(videoRefs.current).forEach((v) => {
+        if (v?.isConnected && v !== video) v.play().catch(() => {});
+      });
+      setIsPlaying(true);
+      logPlayback('play succeeded', snapshot);
+    } catch (error) {
+      logPlaybackError('play() failed, retrying muted', error, snapshot);
+      try {
+        const wasMuted = video.muted;
+        video.muted = true;
+        await video.play();
+        video.muted = wasMuted;
+        Object.values(videoRefs.current).forEach((v) => {
+          if (v?.isConnected && v !== video) {
+            const m = v.muted;
+            v.muted = true;
+            v.play().then(() => { v.muted = m; }).catch(() => {});
+          }
+        });
+        setIsPlaying(true);
+        logPlayback('play succeeded after muted retry', snapshot);
+      } catch (retryError) {
+        logPlaybackError('play() failed after muted retry', retryError, snapshot);
+        setIsPlaying(false);
+      }
+    }
+  }, [format, isPortraitFormat, portraitLayout, isCamTelemetryLayoutActive, layout, selectedAngle, resolveMainAngle]);
 
   const togglePlay = useCallback(() => {
-    const video = getMainVideoElement();
-    if (!video) return;
+    const mainAngle = resolveMainAngle();
+    let video = getMainVideoElement();
+
+    logPlayback('togglePlay called', {
+      format,
+      isPortraitFormat,
+      portraitLayout,
+      isCamTelemetry: isCamTelemetryLayoutActive,
+      layout,
+      selectedAngle,
+      mainAngle,
+      isPlaying,
+      videoFound: !!video,
+      refAngles: Object.keys(videoRefs.current),
+      containerSize: videoContainerRef.current
+        ? { w: videoContainerRef.current.clientWidth, h: videoContainerRef.current.clientHeight }
+        : null,
+      ...describeVideo(video ?? undefined),
+    });
+
+    if (!video) {
+      logPlayback('no connected video yet — retrying next frame', { format, portraitLayout, mainAngle });
+      requestAnimationFrame(() => {
+        const retry = getMainVideoElement();
+        if (!retry) {
+          logPlaybackError('togglePlay retry failed — no video element in DOM', null, {
+            format,
+            portraitLayout,
+            refAngles: Object.keys(videoRefs.current),
+          });
+          return;
+        }
+        if (isPlaying) {
+          retry.pause();
+          setIsPlaying(false);
+        } else {
+          void attemptPlay(retry);
+        }
+      });
+      return;
+    }
+
     (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = video;
+
     if (isPlaying) {
       video.pause();
-      Object.values(videoRefs.current).forEach(v => v?.pause());
+      Object.values(videoRefs.current).forEach((v) => v?.pause());
       setIsPlaying(false);
+      logPlayback('paused', describeVideo(video) ?? {});
     } else {
-      video.play().then(() => {
-        Object.values(videoRefs.current).forEach(v => v?.play().catch(() => {}));
-        setIsPlaying(true);
-      }).catch(() => {});
+      void attemptPlay(video);
     }
-  }, [isPlaying, getMainVideoElement]);
+  }, [isPlaying, getMainVideoElement, resolveMainAngle, format, isPortraitFormat, portraitLayout, isCamTelemetryLayoutActive, layout, selectedAngle, attemptPlay]);
 
   useEffect(() => {
     camTelemetryRatioRef.current = camTelemetryRatio;
@@ -601,7 +732,30 @@ export function VideoPlayer({
 
   useEffect(() => {
     const video = getMainVideoElement();
-    if (!video) return;
+    logPlayback('render context', {
+      format,
+      isPortraitFormat,
+      portraitLayout,
+      isCamTelemetry: isCamTelemetryLayoutActive,
+      layout,
+      selectedAngle,
+      mainAngle: resolveMainAngle(),
+      videoFound: !!video,
+      refAngles: Object.keys(videoRefs.current),
+      containerSize: videoContainerRef.current
+        ? { w: videoContainerRef.current.clientWidth, h: videoContainerRef.current.clientHeight }
+        : null,
+      camSplitSize: camTelemetrySplitRef.current
+        ? { w: camTelemetrySplitRef.current.clientWidth, h: camTelemetrySplitRef.current.clientHeight }
+        : null,
+      ...describeVideo(video ?? undefined),
+    });
+
+    if (!video) {
+      setIsPlaying(false);
+      return;
+    }
+
     (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = video;
 
     const restore = pendingRestoreRef.current;
@@ -609,14 +763,19 @@ export function VideoPlayer({
       const applyRestore = () => {
         video.currentTime = restore.time;
         Object.values(videoRefs.current).forEach((v) => {
-          if (v) v.currentTime = restore.time;
+          if (v?.isConnected) v.currentTime = restore.time;
         });
         if (restore.playing) {
-          video.play().catch(() => {});
-          Object.values(videoRefs.current).forEach((v) => v?.play().catch(() => {}));
-          setIsPlaying(true);
+          void attemptPlay(video);
+        } else {
+          setIsPlaying(false);
         }
         pendingRestoreRef.current = null;
+        logPlayback('restored position after layout/format change', {
+          time: restore.time,
+          playing: restore.playing,
+          ...describeVideo(video),
+        });
       };
       if (video.readyState >= 1) {
         applyRestore();
@@ -624,7 +783,7 @@ export function VideoPlayer({
         video.addEventListener('loadedmetadata', applyRestore, { once: true });
       }
     }
-  }, [getMainVideoElement, format, portraitLayout, layout, videoUrls, currentMoment?.id, selectedAngle]);
+  }, [getMainVideoElement, resolveMainAngle, attemptPlay, format, isPortraitFormat, portraitLayout, isCamTelemetryLayoutActive, layout, videoUrls, currentMoment?.id, selectedAngle]);
 
   useEffect(() => {
     if (!isResizingCamTelemetry) return;
@@ -731,7 +890,7 @@ export function VideoPlayer({
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!mainVideoRef.current || !sequence) return;
+      if (!sequence) return;
 
       switch (e.key) {
         case ' ':
@@ -848,8 +1007,12 @@ export function VideoPlayer({
     if (isPlaying || isTimelineDragging) return null;
     return (
       <button
-        onClick={togglePlay}
-        className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors z-30"
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          togglePlay();
+        }}
+        className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors z-50 pointer-events-auto"
       >
         <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
           <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 20 20">
@@ -933,7 +1096,17 @@ export function VideoPlayer({
                 onEnded={handleVideoEnded}
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
-                onClick={togglePlay}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  togglePlay();
+                }}
+                onError={(e) => {
+                  logPlaybackError('video element error', e.currentTarget.error, {
+                    format,
+                    portraitLayout,
+                    mainAngle: camAngle,
+                  });
+                }}
               />
               {renderPlayOverlay()}
             </>
@@ -1087,7 +1260,14 @@ export function VideoPlayer({
                           onEnded={isMain ? handleVideoEnded : undefined}
                           onPlay={isMain ? () => setIsPlaying(true) : undefined}
                           onPause={isMain ? () => setIsPlaying(false) : undefined}
-                          onClick={isMain ? togglePlay : undefined}
+                          onClick={isMain ? (e) => { e.stopPropagation(); togglePlay(); } : undefined}
+                          onError={(e) => {
+                            logPlaybackError('portrait grid video error', e.currentTarget.error, {
+                              format,
+                              portraitLayout,
+                              angle,
+                            });
+                          }}
                         />
                         {isMain && renderPlayOverlay()}
                       </>
