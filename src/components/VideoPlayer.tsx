@@ -601,8 +601,28 @@ export function VideoPlayer({
 
   useEffect(() => {
     const video = getMainVideoElement();
-    if (video) {
-      (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = video;
+    if (!video) return;
+    (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = video;
+
+    const restore = pendingRestoreRef.current;
+    if (restore) {
+      const applyRestore = () => {
+        video.currentTime = restore.time;
+        Object.values(videoRefs.current).forEach((v) => {
+          if (v) v.currentTime = restore.time;
+        });
+        if (restore.playing) {
+          video.play().catch(() => {});
+          Object.values(videoRefs.current).forEach((v) => v?.play().catch(() => {}));
+          setIsPlaying(true);
+        }
+        pendingRestoreRef.current = null;
+      };
+      if (video.readyState >= 1) {
+        applyRestore();
+      } else {
+        video.addEventListener('loadedmetadata', applyRestore, { once: true });
+      }
     }
   }, [getMainVideoElement, format, portraitLayout, layout, videoUrls, currentMoment?.id, selectedAngle]);
 
@@ -897,6 +917,7 @@ export function VideoPlayer({
           {url && isAvailable ? (
             <>
               <video
+                key={`cam-tel-${format}-${camAngle}-${currentMoment?.id}`}
                 ref={(el) => {
                   videoRefs.current[camAngle] = el;
                   (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
@@ -904,6 +925,8 @@ export function VideoPlayer({
                 src={url}
                 className="w-full h-full object-cover bg-black"
                 style={{ objectPosition: slotAlign }}
+                playsInline
+                preload="auto"
                 muted={false}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
@@ -1005,12 +1028,18 @@ export function VideoPlayer({
       const hasGps = !!(mapSeiData?.latitude_deg && mapSeiData?.longitude_deg);
 
       return (
-        <div className="absolute inset-0 bg-black overflow-hidden flex flex-col">
+        <div
+          className="absolute inset-0 bg-black overflow-hidden grid min-h-0"
+          style={{
+            gridTemplateRows: layoutMeta.rowWeights.map((w) => `${w}fr`).join(' '),
+            rowGap: '1px',
+          }}
+        >
           {layoutMeta.grid.map((row, rowIdx) => (
             <div
               key={rowIdx}
-              className="flex gap-[1px]"
-              style={{ flex: layoutMeta.rowWeights[rowIdx] }}
+              className="grid min-h-0 overflow-hidden"
+              style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))`, columnGap: '1px' }}
             >
               {row.map((slotIdx, colIdx) => {
                 // Map slot
@@ -1036,10 +1065,11 @@ export function VideoPlayer({
                 const slotAlign = alignSlots[slotIdx] || 'center';
 
                 return (
-                  <div key={colIdx} className="group relative flex-1 bg-black overflow-hidden">
+                  <div key={colIdx} className="group relative min-h-0 bg-black overflow-hidden">
                     {url && isAvailable ? (
                       <>
                         <video
+                          key={`portrait-${format}-${portraitLayout}-${angle}-${currentMoment?.id}`}
                           ref={(el) => {
                             videoRefs.current[angle] = el;
                             if (isMain) {
@@ -1049,13 +1079,15 @@ export function VideoPlayer({
                           src={url}
                           className="w-full h-full object-cover bg-black"
                           style={{ objectPosition: slotAlign }}
+                          playsInline
+                          preload="auto"
                           muted={!isMain}
                           onTimeUpdate={isMain ? handleTimeUpdate : undefined}
                           onLoadedMetadata={isMain ? handleLoadedMetadata : undefined}
                           onEnded={isMain ? handleVideoEnded : undefined}
                           onPlay={isMain ? () => setIsPlaying(true) : undefined}
                           onPause={isMain ? () => setIsPlaying(false) : undefined}
-                          onClick={togglePlay}
+                          onClick={isMain ? togglePlay : undefined}
                         />
                         {isMain && renderPlayOverlay()}
                       </>
@@ -1258,7 +1290,12 @@ export function VideoPlayer({
           isFullscreen
             ? undefined
             : isPortraitFormat
-              ? { aspectRatio: `${formatPreset.aspectRatio}`, maxHeight: '60vh' }
+              ? {
+                  aspectRatio: `${formatPreset.aspectRatio}`,
+                  maxHeight: '60vh',
+                  height: '60vh',
+                  width: `min(100%, calc(60vh * ${formatPreset.aspectRatio}))`,
+                }
               : { aspectRatio: '16 / 9', maxHeight: '60vh' }
         }
       >
@@ -1266,7 +1303,8 @@ export function VideoPlayer({
           {renderVideoGrid()}
         </div>
 
-        {/* Overlay anchor - matches visible video area */}
+        {/* Overlay anchor - skip when Cam+Telemetry (HUD rendered in camera panel) */}
+        {!isCamTelemetryLayoutActive && (
         <div
           className="absolute inset-0 flex items-center justify-center pointer-events-none z-20"
         >
@@ -1360,6 +1398,16 @@ export function VideoPlayer({
             )}
           </div>
         </div>
+        )}
+
+        {/* Map for Cam+Telemetry (global overlay skipped in this mode) */}
+        {isCamTelemetryLayoutActive && showMap && (
+          <div className="absolute bottom-3 right-3 z-30 w-[180px] h-[180px] rounded-lg overflow-hidden shadow-xl pointer-events-auto">
+            <Suspense fallback={<div className="bg-gray-900 w-full h-full" />}>
+              <MapView seiData={mapSeiData} />
+            </Suspense>
+          </div>
+        )}
       </div>
 
       {/* Telemetry Graphs - below video (when mode is "below") */}
@@ -1572,7 +1620,7 @@ export function VideoPlayer({
             {isPortraitFormat ? (
               <>
                 {/* Portrait: current layout button + gear opens modal */}
-                <Tooltip content="Change portrait layout" position="top">
+                <Tooltip content="Other portrait layouts" position="top">
                   <button
                     onClick={() => setShowLayoutConfig(prev => !prev)}
                     className={`px-2 py-1 rounded text-xs font-medium transition-all flex items-center gap-1 ${
@@ -1582,7 +1630,11 @@ export function VideoPlayer({
                     }`}
                   >
                     <IconSettings2 size={14} />
-                    <span>{getPortraitLayout(portraitLayout).label}</span>
+                    <span>
+                      {isCamTelemetryLayoutActive
+                        ? 'More layouts'
+                        : getPortraitLayout(portraitLayout).label}
+                    </span>
                   </button>
                 </Tooltip>
                 {showLayoutConfig && (
