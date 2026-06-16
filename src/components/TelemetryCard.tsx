@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { SeiData } from '@/lib/dashcam-mp4';
+import { TelemetryDisplayConfig, DEFAULT_TELEMETRY_DISPLAY_CONFIG } from '@/types/video';
 import Image from 'next/image';
 
 interface TelemetryCardProps {
@@ -10,6 +11,8 @@ interface TelemetryCardProps {
   error: string | null;
   speedUnit: 'mph' | 'kmh';
   onSpeedUnitToggle: () => void;
+  displayConfig?: TelemetryDisplayConfig;
+  compact?: boolean;
 }
 
 const AUTOPILOT_LABELS: Record<number, string> = {
@@ -25,6 +28,8 @@ export function TelemetryCard({
   error,
   speedUnit,
   onSpeedUnitToggle,
+  displayConfig = DEFAULT_TELEMETRY_DISPLAY_CONFIG,
+  compact = false,
 }: TelemetryCardProps) {
   const displaySpeed = useMemo(() => {
     if (!seiData?.vehicle_speed_mps) return 0;
@@ -72,54 +77,72 @@ export function TelemetryCard({
     );
   }
 
+  const showGear = displayConfig.showGear;
+  const showBrake = displayConfig.showBrake;
+  const showBlinkers = displayConfig.showBlinkers;
+  const showSpeed = displayConfig.showSpeed;
+  const showSteering = displayConfig.showSteering;
+  const showAccelerator = displayConfig.showAccelerator;
+  const showAutopilot = displayConfig.showAutopilot && isAutopilotActive;
+
   return (
-    <div className="telemetry-wrapper">
+    <div className={`telemetry-wrapper ${compact ? 'compact' : ''}`}>
       <div className="telemetry-card">
-        {/* Column 1: Gear + Brake */}
-        <div className="telemetry-column">
-          <div className="telemetry-circle telemetry-gear">{gearLetter}</div>
-          <div className={`telemetry-circle telemetry-brake ${seiData.brake_applied ? 'active' : ''}`}>
-            <Image src="/left-pedal.png" alt="Brake" width={16} height={16} className="pedal-icon" />
+        {(showGear || showBrake) && (
+          <div className="telemetry-column">
+            {showGear && <div className="telemetry-circle telemetry-gear">{gearLetter}</div>}
+            {showBrake && (
+              <div className={`telemetry-circle telemetry-brake ${seiData.brake_applied ? 'active' : ''}`}>
+                <Image src="/left-pedal.png" alt="Brake" width={16} height={16} className="pedal-icon" />
+              </div>
+            )}
           </div>
-        </div>
+        )}
 
-        {/* Left Blinker */}
-        <div className={`telemetry-blinker left ${seiData.blinker_on_left ? 'active' : ''}`}>
-          <Image src="/blinker.svg" alt="Left" width={20} height={20} />
-        </div>
-
-        {/* Speed Display */}
-        <div className="telemetry-speed" onClick={onSpeedUnitToggle}>
-          <div className="speed-value">{displaySpeed}</div>
-          <div className="speed-unit">{speedUnit}</div>
-        </div>
-
-        {/* Right Blinker */}
-        <div className={`telemetry-blinker right ${seiData.blinker_on_right ? 'active' : ''}`}>
-          <Image src="/blinker.svg" alt="Right" width={20} height={20} className="rotate-180" />
-        </div>
-
-        {/* Column 2: Steering + Accelerator */}
-        <div className="telemetry-column">
-          <div className={`telemetry-circle telemetry-steering ${isAutopilotActive ? 'autopilot' : ''}`}>
-            <Image
-              src="/wheel.svg"
-              alt="Steering"
-              width={16}
-              height={16}
-              className="wheel-icon"
-              style={{ transform: `rotate(${steeringAngle}deg)` }}
-            />
+        {showBlinkers && (
+          <div className={`telemetry-blinker left ${seiData.blinker_on_left ? 'active' : ''}`}>
+            <Image src="/blinker.svg" alt="Left" width={20} height={20} />
           </div>
-          <div className="telemetry-circle telemetry-accelerator">
-            <div className="accelerator-fill" style={{ height: `${acceleratorPosition}%` }} />
-            <Image src="/right-pedal.png" alt="Accelerator" width={16} height={16} className="pedal-icon overlay" />
+        )}
+
+        {showSpeed && (
+          <div className="telemetry-speed" onClick={onSpeedUnitToggle}>
+            <div className="speed-value">{displaySpeed}</div>
+            <div className="speed-unit">{speedUnit}</div>
           </div>
-        </div>
+        )}
+
+        {showBlinkers && (
+          <div className={`telemetry-blinker right ${seiData.blinker_on_right ? 'active' : ''}`}>
+            <Image src="/blinker.svg" alt="Right" width={20} height={20} className="rotate-180" />
+          </div>
+        )}
+
+        {(showSteering || showAccelerator) && (
+          <div className="telemetry-column">
+            {showSteering && (
+              <div className={`telemetry-circle telemetry-steering ${isAutopilotActive ? 'autopilot' : ''}`}>
+                <Image
+                  src="/wheel.svg"
+                  alt="Steering"
+                  width={16}
+                  height={16}
+                  className="wheel-icon"
+                  style={{ transform: `rotate(${steeringAngle}deg)` }}
+                />
+              </div>
+            )}
+            {showAccelerator && (
+              <div className="telemetry-circle telemetry-accelerator">
+                <div className="accelerator-fill" style={{ height: `${acceleratorPosition}%` }} />
+                <Image src="/right-pedal.png" alt="Accelerator" width={16} height={16} className="pedal-icon overlay" />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Autopilot Label */}
-      {isAutopilotActive && <div className="telemetry-autopilot">{autopilotLabel}</div>}
+      {showAutopilot && <div className="telemetry-autopilot">{autopilotLabel}</div>}
 
       <style jsx>{`
         .telemetry-wrapper {
@@ -247,6 +270,29 @@ export function TelemetryCard({
         @keyframes blink {
           0% { opacity: 1; }
           50% { opacity: 0.3; }
+        }
+
+        .telemetry-wrapper.compact .telemetry-card {
+          gap: 6px;
+          padding: 4px 8px;
+          border-radius: 8px;
+        }
+
+        .telemetry-wrapper.compact .telemetry-circle {
+          width: 22px;
+          height: 22px;
+        }
+
+        .telemetry-wrapper.compact .telemetry-gear {
+          font-size: 12px;
+        }
+
+        .telemetry-wrapper.compact .speed-value {
+          font-size: 22px;
+        }
+
+        .telemetry-wrapper.compact .speed-unit {
+          font-size: 9px;
         }
 
         @media (max-width: 640px) {

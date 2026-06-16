@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useCallback } from 'react';
-import { LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, ANGLE_LABELS, PortraitLayoutType, PortraitLayoutMeta, PORTRAIT_LAYOUTS } from '@/types/video';
-import { IconRefresh, IconX, IconMapPin } from '@tabler/icons-react';
+import { LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, ANGLE_LABELS, PortraitLayoutType, PortraitLayoutMeta, PORTRAIT_LAYOUTS, MAP_SLOT, TELEMETRY_SLOT } from '@/types/video';
+import { IconRefresh, IconX, IconMapPin, IconChartLine } from '@tabler/icons-react';
 
 type LayoutType = 'pip' | 'triple' | 'all';
 
@@ -18,11 +18,12 @@ interface LayoutConfigPopoverProps {
 
 const ALL_ANGLES = ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar', 'right_pillar'];
 
-const PIP_OPTIONS = ['none', ...ALL_ANGLES, 'map'];
+const PIP_OPTIONS = ['none', ...ALL_ANGLES, 'map', 'telemetry'];
 const PIP_LABELS: Record<string, string> = {
   ...ANGLE_LABELS,
   none: 'None',
   map: 'Map',
+  telemetry: 'Telemetry',
 };
 
 function CameraSelect({
@@ -82,14 +83,17 @@ function LayoutThumbnail({ meta, isSelected }: { meta: PortraitLayoutMeta; isSel
             <div
               key={colIdx}
               className={`flex-1 rounded-[2px] flex items-center justify-center ${
-                slotIdx === -1
+                slotIdx === MAP_SLOT
                   ? 'bg-green-800/60'
+                  : slotIdx === TELEMETRY_SLOT
+                  ? 'bg-purple-900/60'
                   : isSelected
                   ? slotColors[slotIdx % slotColors.length]
                   : 'bg-gray-700'
               }`}
             >
-              {slotIdx === -1 && <IconMapPin size={8} className="text-green-400" />}
+              {slotIdx === MAP_SLOT && <IconMapPin size={8} className="text-green-400" />}
+              {slotIdx === TELEMETRY_SLOT && <IconChartLine size={8} className="text-purple-400" />}
             </div>
           ))}
         </div>

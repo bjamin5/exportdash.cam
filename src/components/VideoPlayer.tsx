@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback, lazy, Suspense, ReactNode, useMemo } from 'react';
 import { useSeiData } from '@/hooks/useSeiData';
 import { TelemetryCard } from './TelemetryCard';
-import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig } from '@/types/video';
+import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig, TelemetryDisplayConfig, DEFAULT_TELEMETRY_DISPLAY_CONFIG, TelemetryMode, loadTelemetryDisplayConfig, saveTelemetryDisplayConfig, loadTelemetryMode, saveTelemetryMode, MAP_SLOT, TELEMETRY_SLOT, portraitLayoutHasTelemetry } from '@/types/video';
 import { findMomentForTime, toAbsoluteTime } from '@/lib/sequence-detector';
 import {
   IconArrowUp,
@@ -40,12 +40,15 @@ import {
   IconBrandInstagram,
   IconBrandX,
   IconBrandYoutube,
+  IconChartLine,
 } from '@tabler/icons-react';
 import { VideoExporter } from './VideoExporter';
 import { LayoutConfigPopover } from './LayoutConfigPopover';
 import { PortraitCameraSelector } from './PortraitCameraSelector';
 import { TelemetryTimeline } from './TelemetryTimeline';
 import { TelemetryGraphs } from './TelemetryGraphs';
+import { TelemetryDashboard } from './TelemetryDashboard';
+import { TelemetryOptionsPopover } from './TelemetryOptionsPopover';
 import { Tooltip } from './Tooltip';
 
 // Lazy load MapView to avoid SSR issues with Leaflet
@@ -162,6 +165,11 @@ export function VideoPlayer({
   const [showDateTime, setShowDateTime] = useState<boolean>(
     typeof initConfig.showDateTime === 'boolean' ? initConfig.showDateTime : true
   );
+  const [telemetryDisplayConfig, setTelemetryDisplayConfig] = useState<TelemetryDisplayConfig>(
+    () => loadTelemetryDisplayConfig()
+  );
+  const [telemetryMode, setTelemetryMode] = useState<TelemetryMode>(() => loadTelemetryMode());
+  const [showTelemetryOptions, setShowTelemetryOptions] = useState(false);
 
   // Persist overlay toggle states to localStorage
   useEffect(() => {
@@ -174,6 +182,14 @@ export function VideoPlayer({
       }));
     } catch { /* ignore localStorage write errors */ }
   }, [showTelemetry, showMap, showDateTime, speedUnit]);
+
+  useEffect(() => {
+    saveTelemetryDisplayConfig(telemetryDisplayConfig);
+  }, [telemetryDisplayConfig]);
+
+  useEffect(() => {
+    saveTelemetryMode(telemetryMode);
+  }, [telemetryMode]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [videoAspectRatio, setVideoAspectRatio] = useState<number | null>(null);
   const [isTimelineDragging, setIsTimelineDragging] = useState(false);
@@ -262,6 +278,41 @@ export function VideoPlayer({
   }, [sequence, currentMomentIndex, localTime]);
 
   const totalDuration = sequence?.totalDuration || 0;
+
+  const portraitHasTelemetrySlot = useMemo(
+    () => isPortraitFormat && portraitLayoutHasTelemetry(portraitLayout),
+    [isPortraitFormat, portraitLayout]
+  );
+
+  const showHudOverlayTop = useMemo(
+    () =>
+      showTelemetry &&
+      telemetryDisplayConfig.showHud &&
+      (telemetryMode === 'overlay-top' || telemetryMode === 'below') &&
+      !portraitHasTelemetrySlot,
+    [showTelemetry, telemetryDisplayConfig.showHud, telemetryMode, portraitHasTelemetrySlot]
+  );
+
+  const showDashboardOverlayBottom = useMemo(
+    () => showTelemetry && telemetryMode === 'overlay-bottom' && !portraitHasTelemetrySlot,
+    [showTelemetry, telemetryMode, portraitHasTelemetrySlot]
+  );
+
+  const showDashboardSplit = useMemo(
+    () => showTelemetry && telemetryMode === 'split' && !portraitHasTelemetrySlot,
+    [showTelemetry, telemetryMode, portraitHasTelemetrySlot]
+  );
+
+  const showGraphsBelowPlayer = useMemo(
+    () =>
+      showTelemetry &&
+      telemetryMode === 'below' &&
+      !portraitHasTelemetrySlot &&
+      (telemetryDisplayConfig.showGraphLong ||
+        telemetryDisplayConfig.showGraphLat ||
+        telemetryDisplayConfig.showGraphSpeed),
+    [showTelemetry, telemetryMode, portraitHasTelemetrySlot, telemetryDisplayConfig]
+  );
 
   // Get the main video file for SEI data
   const mainVideo = currentMoment?.videos.find(v => v.angle === 'front') || currentMoment?.videos[0];
@@ -723,6 +774,43 @@ export function VideoPlayer({
     );
   };
 
+  const renderTelemetryDashboard = (options?: { compact?: boolean; showHud?: boolean; showGraphs?: boolean; className?: string }) => (
+    <TelemetryDashboard
+      seiData={seiData}
+      isLoading={isLoading}
+      error={error}
+      allSeiMessages={allSeiMessages}
+      fps={fps}
+      duration={totalDuration}
+      currentTime={absoluteTime}
+      isPlaying={isPlaying}
+      playbackRate={playbackRate}
+      speedUnit={speedUnit}
+      onSpeedUnitToggle={() => setSpeedUnit((prev) => (prev === 'mph' ? 'kmh' : 'mph'))}
+      onSeek={handleTimelineSeek}
+      onDraggingChange={setIsTimelineDragging}
+      trimPoints={trimPoints}
+      isTrimming={isTrimming}
+      displayConfig={telemetryDisplayConfig}
+      compact={options?.compact}
+      showHud={options?.showHud}
+      showGraphs={options?.showGraphs}
+      className={options?.className ?? 'w-full h-full'}
+    />
+  );
+
+  const wrapWithSplitLayout = (content: ReactNode) => {
+    if (!showDashboardSplit) return content;
+    return (
+      <div className="flex flex-col w-full h-full">
+        <div className="flex-[3] min-h-0 relative overflow-hidden">{content}</div>
+        <div className="flex-[2] min-h-0 border-t border-gray-800">
+          {renderTelemetryDashboard({ compact: true })}
+        </div>
+      </div>
+    );
+  };
+
   // Render video grid based on layout
   const renderVideoGrid = () => {
     // Portrait social format — use portrait layout system
@@ -740,8 +828,21 @@ export function VideoPlayer({
               style={{ flex: layoutMeta.rowWeights[rowIdx] }}
             >
               {row.map((slotIdx, colIdx) => {
+                // Telemetry dashboard slot
+                if (slotIdx === TELEMETRY_SLOT) {
+                  return (
+                    <div key={colIdx} className="relative flex-1 bg-black overflow-hidden isolate z-0">
+                      {showTelemetry ? (
+                        renderTelemetryDashboard({ compact: true })
+                      ) : (
+                        <span className="text-gray-600 text-xs flex items-center justify-center h-full">Telemetry</span>
+                      )}
+                    </div>
+                  );
+                }
+
                 // Map slot
-                if (slotIdx === -1) {
+                if (slotIdx === MAP_SLOT) {
                   return (
                     <div key={colIdx} className="relative flex-1 bg-gray-900 flex items-center justify-center overflow-hidden isolate z-0">
                       {hasGps && showMap ? (
@@ -813,15 +914,14 @@ export function VideoPlayer({
 
     // Single view - just one camera
     if (layout === 'single') {
-      return (
-        <div className="relative w-full bg-black flex items-center justify-center aspect-video max-h-full">
+      return wrapWithSplitLayout(
+        <div className="relative w-full h-full bg-black flex items-center justify-center aspect-video max-h-full">
           <div className="w-full h-full">
             {renderVideo(selectedAngle, true, 'w-full h-full')}
           </div>
           <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-xs font-medium flex items-center gap-1">
             {ANGLE_ICONS[selectedAngle]} {ANGLE_LABELS[selectedAngle]}
           </div>
-          {/* Clip indicator for multi-clip sequences */}
           {sequence.clipCount > 1 && (
             <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-xs font-medium">
               Clip {currentMomentIndex + 1}/{sequence.clipCount}
@@ -863,6 +963,13 @@ export function VideoPlayer({
             </div>
           );
         }
+        if (value === 'telemetry' && showTelemetry) {
+          return (
+            <div key={idx} className={`${pos} w-[30%] h-[28%] rounded-lg overflow-hidden border border-purple-500/30 shadow-lg pointer-events-none bg-black`}>
+              {renderTelemetryDashboard({ compact: true, showHud: true, showGraphs: true })}
+            </div>
+          );
+        }
         if (!availableAngles.includes(value)) return null;
         return (
           <div
@@ -874,8 +981,8 @@ export function VideoPlayer({
         );
       };
 
-      return (
-        <div className="relative w-full bg-black flex items-center justify-center aspect-video max-h-full overflow-hidden">
+      return wrapWithSplitLayout(
+        <div className="relative w-full h-full bg-black flex items-center justify-center aspect-video max-h-full overflow-hidden">
           <div
             className="relative max-w-full max-h-full"
             style={{ aspectRatio: `${ar}` }}
@@ -883,9 +990,7 @@ export function VideoPlayer({
             <div className="w-full h-full">
               {renderVideo(selectedAngle, true, 'w-full h-full')}
             </div>
-            {/* All 5 PiP corners - each absolutely positioned */}
             {corners.map((value, idx) => renderPipCorner(value, idx))}
-
             {renderPlayOverlay()}
           </div>
         </div>
@@ -896,9 +1001,9 @@ export function VideoPlayer({
     if (layout === 'triple') {
       const tripleAngles = layoutConfig.triple.cameras;
 
-      return (
-        <div className="relative w-full bg-black flex items-center justify-center overflow-hidden aspect-video max-h-full">
-          <div className="grid grid-cols-3 w-full">
+      return wrapWithSplitLayout(
+        <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden aspect-video max-h-full">
+          <div className="grid grid-cols-3 w-full h-full">
             {tripleAngles.map((angle, idx) => {
               const isMain = angle === selectedAngle;
               const isAvailable = availableAngles.includes(angle);
@@ -911,7 +1016,7 @@ export function VideoPlayer({
                   } ${isAvailable ? 'cursor-pointer' : 'opacity-40'}`}
                   onClick={() => isAvailable && handleAngleChange(angle)}
                 >
-                  {renderVideo(angle, isMain, 'w-full')}
+                  {renderVideo(angle, isMain, 'w-full h-full')}
                 </div>
               );
             })}
@@ -928,8 +1033,8 @@ export function VideoPlayer({
         layoutConfig.all.bottomRow,
       ];
 
-      return (
-        <div className="relative w-full bg-black flex items-center justify-center overflow-hidden aspect-video max-h-full">
+      return wrapWithSplitLayout(
+        <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden aspect-video max-h-full">
           <div className="absolute inset-0 flex flex-col gap-1 p-1">
             {rows.map((row, rowIdx) => (
               <div key={rowIdx} className="flex-1 flex gap-1 min-h-0">
@@ -994,8 +1099,8 @@ export function VideoPlayer({
                 : undefined
             }
           >
-            {/* Telemetry Overlay - Top Center */}
-            {showTelemetry && (
+            {/* Telemetry HUD - top overlay */}
+            {showHudOverlayTop && (
               <div className="absolute top-3 left-1/2 -translate-x-1/2 pointer-events-auto">
                 <TelemetryCard
                   seiData={seiData}
@@ -1003,15 +1108,25 @@ export function VideoPlayer({
                   error={error}
                   speedUnit={speedUnit}
                   onSpeedUnitToggle={() => setSpeedUnit(prev => prev === 'mph' ? 'kmh' : 'mph')}
+                  displayConfig={telemetryDisplayConfig}
                 />
+              </div>
+            )}
+
+            {/* Telemetry dashboard - bottom overlay */}
+            {showDashboardOverlayBottom && (
+              <div className="absolute bottom-0 left-0 right-0 pointer-events-auto max-h-[45%]">
+                {renderTelemetryDashboard({ compact: true })}
               </div>
             )}
 
             {/* Date/Time Overlay - Below Telemetry or Top Center */}
             {showDateTime && (
               <div className={`absolute left-1/2 -translate-x-1/2 pointer-events-none ${
-                showTelemetry
+                showHudOverlayTop
                   ? [1, 2, 3].includes(seiData?.autopilot_state ?? 0) ? 'top-[105px]' : 'top-[95px]'
+                  : showDashboardOverlayBottom
+                  ? 'top-3'
                   : 'top-3'
               }`}>
                 <div className="px-2 py-1 rounded-md bg-black/50 backdrop-blur-sm text-white/90 text-xs font-medium">
@@ -1065,8 +1180,8 @@ export function VideoPlayer({
         </div>
       </div>
 
-      {/* Telemetry Graphs - camCut-style accel / lateral / speed charts */}
-      {showTelemetry && totalDuration > 0 && (
+      {/* Telemetry Graphs - below video (when mode is "below") */}
+      {showGraphsBelowPlayer && totalDuration > 0 && (
         <TelemetryGraphs
           allSeiMessages={allSeiMessages}
           fps={fps}
@@ -1079,6 +1194,7 @@ export function VideoPlayer({
           onDraggingChange={setIsTimelineDragging}
           trimPoints={trimPoints}
           isTrimming={isTrimming}
+          displayConfig={telemetryDisplayConfig}
         />
       )}
 
@@ -1390,18 +1506,42 @@ export function VideoPlayer({
           {/* Overlay Toggles */}
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-gray-500 mr-1">Show:</span>
-            <Tooltip content="Telemetry (T)" position="top">
-              <button
-                onClick={() => setShowTelemetry(prev => !prev)}
-                className={`p-1.5 rounded transition-all ${
-                  showTelemetry
-                    ? 'bg-green-600 text-white'
-                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                }`}
-              >
-                <IconBolt size={16} />
-              </button>
-            </Tooltip>
+            <div className="relative">
+              <Tooltip content="Telemetry (T)" position="top">
+                <button
+                  onClick={() => setShowTelemetry(prev => !prev)}
+                  className={`p-1.5 rounded transition-all ${
+                    showTelemetry
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }`}
+                >
+                  <IconBolt size={16} />
+                </button>
+              </Tooltip>
+              {showTelemetry && (
+                <Tooltip content="Telemetry options" position="top">
+                  <button
+                    onClick={() => setShowTelemetryOptions(prev => !prev)}
+                    className={`absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] ${
+                      showTelemetryOptions ? 'bg-blue-500 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+                    }`}
+                  >
+                    <IconChartLine size={8} />
+                  </button>
+                </Tooltip>
+              )}
+              {showTelemetryOptions && showTelemetry && (
+                <TelemetryOptionsPopover
+                  displayConfig={telemetryDisplayConfig}
+                  telemetryMode={telemetryMode}
+                  onDisplayConfigChange={setTelemetryDisplayConfig}
+                  onTelemetryModeChange={setTelemetryMode}
+                  onClose={() => setShowTelemetryOptions(false)}
+                  hasTelemetrySlot={portraitHasTelemetrySlot}
+                />
+              )}
+            </div>
             {showTelemetry && (
               <Tooltip content={`Speed: ${speedUnit === 'mph' ? 'mph' : 'km/h'} (click to switch)`} position="top">
                 <button
@@ -1472,6 +1612,8 @@ export function VideoPlayer({
               portraitLayout={portraitLayout}
               portraitCameraConfig={portraitCameraConfig}
               portraitAlignConfig={portraitAlignConfig}
+              telemetryDisplayConfig={telemetryDisplayConfig}
+              telemetryMode={telemetryMode}
             />
 
             {/* Divider */}

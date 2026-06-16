@@ -111,7 +111,7 @@ export interface LayoutCameraConfig {
 }
 
 /** Special PiP corner values (besides camera angles) */
-export const PIP_SPECIAL_OPTIONS = ['none', 'map'] as const;
+export const PIP_SPECIAL_OPTIONS = ['none', 'map', 'telemetry'] as const;
 
 export const DEFAULT_LAYOUT_CONFIG: LayoutCameraConfig = {
   pip: { corners: ['left_repeater', 'none', 'right_repeater', 'back', 'map'] },
@@ -268,8 +268,103 @@ export function getFormatPreset(id: FormatType): FormatPreset {
   return FORMAT_PRESETS.find(f => f.id === id) || FORMAT_PRESETS[0];
 }
 
+/** Special portrait slot indices (non-camera) */
+export const MAP_SLOT = -1;
+export const TELEMETRY_SLOT = -2;
+
+/** Per-element telemetry visibility (all enabled by default) */
+export interface TelemetryDisplayConfig {
+  showHud: boolean;
+  showGraphLong: boolean;
+  showGraphLat: boolean;
+  showGraphSpeed: boolean;
+  showSpeed: boolean;
+  showGear: boolean;
+  showBrake: boolean;
+  showBlinkers: boolean;
+  showSteering: boolean;
+  showAccelerator: boolean;
+  showAutopilot: boolean;
+}
+
+export const DEFAULT_TELEMETRY_DISPLAY_CONFIG: TelemetryDisplayConfig = {
+  showHud: true,
+  showGraphLong: true,
+  showGraphLat: true,
+  showGraphSpeed: true,
+  showSpeed: true,
+  showGear: true,
+  showBrake: true,
+  showBlinkers: true,
+  showSteering: true,
+  showAccelerator: true,
+  showAutopilot: true,
+};
+
+/** How telemetry is composed into the video frame */
+export type TelemetryMode =
+  | 'overlay-top'    // HUD card at top of frame
+  | 'overlay-bottom' // Full dashboard pinned to bottom of frame
+  | 'split'          // Camera top, dashboard bottom (in-frame)
+  | 'below';         // Graphs below the player (outside frame)
+
+export const TELEMETRY_MODE_LABELS: Record<TelemetryMode, string> = {
+  'overlay-top': 'HUD on top',
+  'overlay-bottom': 'Dashboard bottom',
+  'split': 'Split screen',
+  'below': 'Graphs below video',
+};
+
+const TELEMETRY_CONFIG_KEY = 'exportdash-telemetry-config';
+
+export function loadTelemetryDisplayConfig(): TelemetryDisplayConfig {
+  try {
+    const stored = localStorage.getItem(TELEMETRY_CONFIG_KEY);
+    if (!stored) return { ...DEFAULT_TELEMETRY_DISPLAY_CONFIG };
+    const parsed = JSON.parse(stored);
+    return { ...DEFAULT_TELEMETRY_DISPLAY_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_TELEMETRY_DISPLAY_CONFIG };
+  }
+}
+
+export function saveTelemetryDisplayConfig(config: TelemetryDisplayConfig): void {
+  try {
+    localStorage.setItem(TELEMETRY_CONFIG_KEY, JSON.stringify(config));
+  } catch {
+    // Silently fail
+  }
+}
+
+export function loadTelemetryMode(): TelemetryMode {
+  try {
+    const stored = localStorage.getItem('exportdash-telemetry-mode');
+    const modes: TelemetryMode[] = ['overlay-top', 'overlay-bottom', 'split', 'below'];
+    if (stored && modes.includes(stored as TelemetryMode)) {
+      return stored as TelemetryMode;
+    }
+  } catch { /* ignore */ }
+  return 'below';
+}
+
+export function saveTelemetryMode(mode: TelemetryMode): void {
+  try {
+    localStorage.setItem('exportdash-telemetry-mode', mode);
+  } catch {
+    // Silently fail
+  }
+}
+
 /** Portrait layout types for social media formats */
-export type PortraitLayoutType = 'p-single' | 'p-split' | 'p-1-2' | 'p-grid' | 'p-1-2-1' | 'p-six' | 'p-six-map';
+export type PortraitLayoutType =
+  | 'p-single'
+  | 'p-split'
+  | 'p-1-2'
+  | 'p-grid'
+  | 'p-1-2-1'
+  | 'p-six'
+  | 'p-six-map'
+  | 'p-cam-telemetry';
 
 export interface PortraitLayoutMeta {
   id: PortraitLayoutType;
@@ -277,10 +372,19 @@ export interface PortraitLayoutMeta {
   description: string;
   slotCount: number;
   hasMap: boolean;
-  /** Row arrays of slot indices; -1 = map placeholder */
+  hasTelemetry?: boolean;
+  /** Row arrays of slot indices; -1 = map, -2 = telemetry dashboard */
   grid: number[][];
   /** Flex weight for each row */
   rowWeights: number[];
+}
+
+export function portraitLayoutHasTelemetry(layout: PortraitLayoutType): boolean {
+  return getPortraitLayout(layout).hasTelemetry === true;
+}
+
+export function portraitLayoutHasSlot(layout: PortraitLayoutType, slot: number): boolean {
+  return getPortraitLayout(layout).grid.some((row) => row.includes(slot));
 }
 
 export const PORTRAIT_LAYOUTS: PortraitLayoutMeta[] = [
@@ -344,8 +448,18 @@ export const PORTRAIT_LAYOUTS: PortraitLayoutMeta[] = [
     description: '5 cameras + map',
     slotCount: 5,
     hasMap: true,
-    grid: [[0, 1], [2, 3], [4, -1]],
+    grid: [[0, 1], [2, 3], [4, MAP_SLOT]],
     rowWeights: [1, 1, 1],
+  },
+  {
+    id: 'p-cam-telemetry',
+    label: 'Cam + Telemetry',
+    description: 'Camera on top, telemetry dashboard below',
+    slotCount: 1,
+    hasMap: false,
+    hasTelemetry: true,
+    grid: [[0], [TELEMETRY_SLOT]],
+    rowWeights: [3, 2],
   },
 ];
 
@@ -364,6 +478,7 @@ export const DEFAULT_PORTRAIT_CAMERA_CONFIG: PortraitCameraConfig = {
   'p-1-2-1': ['front', 'left_repeater', 'right_repeater', 'back'],
   'p-six': ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar', 'right_pillar'],
   'p-six-map': ['front', 'back', 'left_repeater', 'right_repeater', 'left_pillar'],
+  'p-cam-telemetry': ['front'],
 };
 
 const PORTRAIT_LAYOUT_KEY = 'tesla-cam-portrait-layout';
@@ -435,6 +550,7 @@ export const DEFAULT_PORTRAIT_ALIGN_CONFIG: PortraitAlignConfig = {
   'p-1-2-1': ['center', 'center', 'center', 'center'],
   'p-six': ['center', 'center', 'center', 'center', 'center', 'center'],
   'p-six-map': ['center', 'center', 'center', 'center', 'center'],
+  'p-cam-telemetry': ['center'],
 };
 
 const PORTRAIT_ALIGN_CONFIG_KEY = 'tesla-cam-portrait-align-config';
