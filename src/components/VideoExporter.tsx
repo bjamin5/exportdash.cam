@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { IconDownload, IconPlayerStop, IconLoader2, IconCheck } from '@tabler/icons-react';
 import { SeiData, SeiWithFrameIndex } from '@/lib/dashcam-mp4';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
-import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, FormatType, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, getPortraitLayout, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, TelemetryDisplayConfig, TelemetryMode, DEFAULT_TELEMETRY_DISPLAY_CONFIG, MAP_SLOT, TELEMETRY_SLOT, portraitLayoutHasTelemetry } from '@/types/video';
+import { VideoSequence, TrimPoints, CameraSegment, formatDuration, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, FormatType, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, getPortraitLayout, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, TelemetryDisplayConfig, TelemetryMode, DEFAULT_TELEMETRY_DISPLAY_CONFIG, MAP_SLOT, TELEMETRY_SLOT, isCamTelemetryLayout, DEFAULT_CAM_TELEMETRY_RATIO } from '@/types/video';
 import { drawTelemetryChartsInBounds, seiMessagesToGraphPoints, graphVisibilityFromConfig } from '@/lib/telemetry-graph-canvas';
 import { Tooltip } from './Tooltip';
 
@@ -30,6 +30,7 @@ interface VideoExporterProps {
   portraitAlignConfig?: PortraitAlignConfig;
   telemetryDisplayConfig?: TelemetryDisplayConfig;
   telemetryMode?: TelemetryMode;
+  camTelemetryRatio?: number;
 }
 
 // Map tile cache
@@ -123,6 +124,7 @@ export function VideoExporter({
   portraitAlignConfig = DEFAULT_PORTRAIT_ALIGN_CONFIG,
   telemetryDisplayConfig = DEFAULT_TELEMETRY_DISPLAY_CONFIG,
   telemetryMode = 'below',
+  camTelemetryRatio = DEFAULT_CAM_TELEMETRY_RATIO,
 }: VideoExporterProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
@@ -923,7 +925,11 @@ export function VideoExporter({
 
           for (let rowIdx = 0; rowIdx < pLayoutMeta.grid.length; rowIdx++) {
             const row = pLayoutMeta.grid[rowIdx];
-            const rowH = Math.floor(availH * pLayoutMeta.rowWeights[rowIdx] / totalWeight);
+            const rowH = isCamTelemetryLayout(portraitLayout) && pLayoutMeta.grid.length === 2
+              ? (rowIdx === 0
+                ? Math.floor(availH * camTelemetryRatio)
+                : availH - Math.floor(availH * camTelemetryRatio))
+              : Math.floor(availH * pLayoutMeta.rowWeights[rowIdx] / totalWeight);
             const totalColGap = (row.length - 1) * gap;
             const cellW = Math.floor((width - totalColGap) / row.length);
             let curX = 0;
@@ -1137,10 +1143,11 @@ export function VideoExporter({
           await seekVideo(localTime);
           await new Promise((r) => setTimeout(r, 10));
 
-          const useSplitExport = showTelemetry && telemetryMode === 'split' && !isPortraitFormat;
+          const useCamTelemetryExport = showTelemetry && isCamTelemetryLayout(portraitLayout);
+          const useSplitExport = showTelemetry && telemetryMode === 'split' && !isPortraitFormat && !useCamTelemetryExport;
 
-          if (useSplitExport) {
-            const videoH = Math.floor(height * 0.6);
+          if (useCamTelemetryExport || useSplitExport) {
+            const videoH = Math.floor(height * (useCamTelemetryExport ? camTelemetryRatio : 0.6));
             ctx.drawImage(tempVideo, 0, 0, width, videoH);
             const viewStart = exportStart;
             const viewEnd = exportEnd;
@@ -1311,7 +1318,7 @@ export function VideoExporter({
       }
       tempVideo.src = '';
     }
-  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig, format, portraitLayout, portraitCameraConfig, portraitAlignConfig, telemetryDisplayConfig, telemetryMode]);
+  }, [sequence, selectedAngle, allSeiMessages, fps, speedUnit, getSeiForTime, getAngleForTime, trimPoints, showTelemetry, showDateTime, showMap, layout, layoutConfig, format, portraitLayout, portraitCameraConfig, portraitAlignConfig, telemetryDisplayConfig, telemetryMode, camTelemetryRatio]);
 
   const stopExport = useCallback(() => {
     abortRef.current = true;

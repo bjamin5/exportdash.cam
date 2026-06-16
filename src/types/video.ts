@@ -379,8 +379,40 @@ export interface PortraitLayoutMeta {
   rowWeights: number[];
 }
 
+export const CAM_TELEMETRY_LAYOUT: PortraitLayoutType = 'p-cam-telemetry';
+
+export function isCamTelemetryLayout(layout: PortraitLayoutType): boolean {
+  return layout === CAM_TELEMETRY_LAYOUT;
+}
+
 export function portraitLayoutHasTelemetry(layout: PortraitLayoutType): boolean {
-  return getPortraitLayout(layout).hasTelemetry === true;
+  return isCamTelemetryLayout(layout);
+}
+
+export const DEFAULT_CAM_TELEMETRY_RATIO = 0.6;
+export const MIN_CAM_TELEMETRY_RATIO = 0.28;
+export const MAX_CAM_TELEMETRY_RATIO = 0.82;
+
+const CAM_TELEMETRY_RATIO_KEY = 'exportdash-cam-telemetry-ratio';
+
+export function loadCamTelemetryRatio(): number {
+  try {
+    const stored = localStorage.getItem(CAM_TELEMETRY_RATIO_KEY);
+    if (stored) {
+      const value = parseFloat(stored);
+      if (!Number.isNaN(value) && value >= MIN_CAM_TELEMETRY_RATIO && value <= MAX_CAM_TELEMETRY_RATIO) {
+        return value;
+      }
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_CAM_TELEMETRY_RATIO;
+}
+
+export function saveCamTelemetryRatio(ratio: number): void {
+  try {
+    const clamped = Math.min(MAX_CAM_TELEMETRY_RATIO, Math.max(MIN_CAM_TELEMETRY_RATIO, ratio));
+    localStorage.setItem(CAM_TELEMETRY_RATIO_KEY, String(clamped));
+  } catch { /* ignore */ }
 }
 
 export function portraitLayoutHasSlot(layout: PortraitLayoutType, slot: number): boolean {

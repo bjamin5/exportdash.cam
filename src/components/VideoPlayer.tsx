@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, useCallback, lazy, Suspense, ReactNode, useMemo } from 'react';
 import { useSeiData } from '@/hooks/useSeiData';
 import { TelemetryCard } from './TelemetryCard';
-import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig, TelemetryDisplayConfig, DEFAULT_TELEMETRY_DISPLAY_CONFIG, TelemetryMode, loadTelemetryDisplayConfig, saveTelemetryDisplayConfig, loadTelemetryMode, saveTelemetryMode, MAP_SLOT, TELEMETRY_SLOT, portraitLayoutHasTelemetry } from '@/types/video';
+import { VideoSequence, ANGLE_LABELS, ANGLE_ORDER, VideoMoment, TrimPoints, CameraSegment, LayoutCameraConfig, DEFAULT_LAYOUT_CONFIG, loadLayoutConfig, saveLayoutConfig, FormatType, FORMAT_PRESETS, getFormatPreset, PortraitLayoutType, PortraitCameraConfig, PORTRAIT_LAYOUTS, getPortraitLayout, loadPortraitLayout, savePortraitLayout, loadPortraitCameraConfig, savePortraitCameraConfig, DEFAULT_PORTRAIT_CAMERA_CONFIG, AlignPosition, PortraitAlignConfig, DEFAULT_PORTRAIT_ALIGN_CONFIG, loadPortraitAlignConfig, savePortraitAlignConfig, TelemetryDisplayConfig, DEFAULT_TELEMETRY_DISPLAY_CONFIG, TelemetryMode, loadTelemetryDisplayConfig, saveTelemetryDisplayConfig, loadTelemetryMode, saveTelemetryMode, MAP_SLOT, TELEMETRY_SLOT, isCamTelemetryLayout, CAM_TELEMETRY_LAYOUT, loadCamTelemetryRatio, saveCamTelemetryRatio, MIN_CAM_TELEMETRY_RATIO, MAX_CAM_TELEMETRY_RATIO } from '@/types/video';
 import { findMomentForTime, toAbsoluteTime } from '@/lib/sequence-detector';
 import {
   IconArrowUp,
@@ -208,6 +208,10 @@ export function VideoPlayer({
   const [portraitLayout, setPortraitLayout] = useState<PortraitLayoutType>('p-1-2');
   const [portraitCameraConfig, setPortraitCameraConfig] = useState<PortraitCameraConfig>({ ...DEFAULT_PORTRAIT_CAMERA_CONFIG });
   const [portraitAlignConfig, setPortraitAlignConfig] = useState<PortraitAlignConfig>({ ...DEFAULT_PORTRAIT_ALIGN_CONFIG });
+  const [camTelemetryRatio, setCamTelemetryRatio] = useState(loadCamTelemetryRatio);
+  const [isResizingCamTelemetry, setIsResizingCamTelemetry] = useState(false);
+  const camTelemetrySplitRef = useRef<HTMLDivElement>(null);
+  const camTelemetryRatioRef = useRef(camTelemetryRatio);
 
   // Load layout config from localStorage on mount
   useEffect(() => {
@@ -287,14 +291,18 @@ export function VideoPlayer({
 
   const totalDuration = sequence?.totalDuration || 0;
 
-  const portraitHasTelemetrySlot = useMemo(
-    () => isPortraitFormat && portraitLayoutHasTelemetry(portraitLayout),
-    [isPortraitFormat, portraitLayout]
-  );
+  const isCamTelemetryLayoutActive = isCamTelemetryLayout(portraitLayout);
+
+  const portraitHasTelemetrySlot = isCamTelemetryLayoutActive;
 
   const showHudOverlayTop = useMemo(
-    () => showTelemetry && telemetryDisplayConfig.showHud,
-    [showTelemetry, telemetryDisplayConfig.showHud]
+    () => showTelemetry && telemetryDisplayConfig.showHud && !isCamTelemetryLayoutActive,
+    [showTelemetry, telemetryDisplayConfig.showHud, isCamTelemetryLayoutActive]
+  );
+
+  const showHudInCamTelemetry = useMemo(
+    () => showTelemetry && telemetryDisplayConfig.showHud && isCamTelemetryLayoutActive,
+    [showTelemetry, telemetryDisplayConfig.showHud, isCamTelemetryLayoutActive]
   );
 
   const showDashboardOverlayBottom = useMemo(
@@ -303,8 +311,8 @@ export function VideoPlayer({
   );
 
   const showDashboardSplit = useMemo(
-    () => showTelemetry && telemetryMode === 'split' && !portraitHasTelemetrySlot,
-    [showTelemetry, telemetryMode, portraitHasTelemetrySlot]
+    () => showTelemetry && telemetryMode === 'split' && !isCamTelemetryLayoutActive,
+    [showTelemetry, telemetryMode, isCamTelemetryLayoutActive]
   );
 
   const showGraphsBelowPlayer = useMemo(
@@ -505,8 +513,12 @@ export function VideoPlayer({
   const handleLayoutChange = useCallback((newLayout: LayoutType) => {
     if (newLayout === layout) return;
     pendingRestoreRef.current = { time: localTime, playing: isPlaying };
+    if (isCamTelemetryLayout(portraitLayout)) {
+      setPortraitLayout('p-1-2');
+      savePortraitLayout('p-1-2');
+    }
     setLayout(newLayout);
-  }, [layout, localTime, isPlaying]);
+  }, [layout, localTime, isPlaying, portraitLayout]);
 
   const handleAngleChange = useCallback((newAngle: string) => {
     if (newAngle === selectedAngle) return;
@@ -559,18 +571,68 @@ export function VideoPlayer({
     setTrimPoints(newTrimPoints);
   }, []);
 
+  const getMainVideoElement = useCallback((): HTMLVideoElement | null => {
+    if (mainVideoRef.current) return mainVideoRef.current;
+    const camAngle = isCamTelemetryLayoutActive
+      ? (portraitCameraConfig[CAM_TELEMETRY_LAYOUT]?.[0] || selectedAngle)
+      : selectedAngle;
+    return videoRefs.current[camAngle] ?? videoRefs.current.front ?? Object.values(videoRefs.current).find(Boolean) ?? null;
+  }, [isCamTelemetryLayoutActive, portraitCameraConfig, selectedAngle]);
+
   const togglePlay = useCallback(() => {
-    if (mainVideoRef.current) {
-      if (isPlaying) {
-        mainVideoRef.current.pause();
-        Object.values(videoRefs.current).forEach(v => v?.pause());
-      } else {
-        mainVideoRef.current.play();
+    const video = getMainVideoElement();
+    if (!video) return;
+    (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = video;
+    if (isPlaying) {
+      video.pause();
+      Object.values(videoRefs.current).forEach(v => v?.pause());
+      setIsPlaying(false);
+    } else {
+      video.play().then(() => {
         Object.values(videoRefs.current).forEach(v => v?.play().catch(() => {}));
-      }
-      setIsPlaying(!isPlaying);
+        setIsPlaying(true);
+      }).catch(() => {});
     }
-  }, [isPlaying]);
+  }, [isPlaying, getMainVideoElement]);
+
+  useEffect(() => {
+    camTelemetryRatioRef.current = camTelemetryRatio;
+  }, [camTelemetryRatio]);
+
+  useEffect(() => {
+    const video = getMainVideoElement();
+    if (video) {
+      (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = video;
+    }
+  }, [getMainVideoElement, format, portraitLayout, layout, videoUrls, currentMoment?.id, selectedAngle]);
+
+  useEffect(() => {
+    if (!isResizingCamTelemetry) return;
+
+    const handleMove = (e: PointerEvent) => {
+      const el = camTelemetrySplitRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const ratio = Math.min(
+        MAX_CAM_TELEMETRY_RATIO,
+        Math.max(MIN_CAM_TELEMETRY_RATIO, (e.clientY - rect.top) / rect.height)
+      );
+      camTelemetryRatioRef.current = ratio;
+      setCamTelemetryRatio(ratio);
+    };
+
+    const handleUp = () => {
+      setIsResizingCamTelemetry(false);
+      saveCamTelemetryRatio(camTelemetryRatioRef.current);
+    };
+
+    document.addEventListener('pointermove', handleMove);
+    document.addEventListener('pointerup', handleUp);
+    return () => {
+      document.removeEventListener('pointermove', handleMove);
+      document.removeEventListener('pointerup', handleUp);
+    };
+  }, [isResizingCamTelemetry]);
 
   // Seek to absolute time (handles cross-clip seeking)
   const seekToAbsoluteTime = useCallback((targetAbsoluteTime: number) => {
@@ -767,7 +829,7 @@ export function VideoPlayer({
     return (
       <button
         onClick={togglePlay}
-        className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors z-10"
+        className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors z-30"
       >
         <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
           <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 20 20">
@@ -816,8 +878,126 @@ export function VideoPlayer({
     );
   };
 
+  const renderCamTelemetrySplit = () => {
+    const camAngle = isPortraitFormat
+      ? (portraitCameraConfig[CAM_TELEMETRY_LAYOUT]?.[0] || 'front')
+      : selectedAngle;
+    const url = videoUrls[camAngle];
+    const isAvailable = availableAngles.includes(camAngle);
+    const slotAlign = (portraitAlignConfig[CAM_TELEMETRY_LAYOUT] || [])[0] || 'center';
+    const telemetryFraction = 1 - camTelemetryRatio;
+
+    return (
+      <div
+        ref={camTelemetrySplitRef}
+        className="absolute inset-0 grid min-h-0 bg-black"
+        style={{ gridTemplateRows: `${camTelemetryRatio}fr 6px ${telemetryFraction}fr` }}
+      >
+        <div className="relative min-h-0 overflow-hidden bg-black">
+          {url && isAvailable ? (
+            <>
+              <video
+                ref={(el) => {
+                  videoRefs.current[camAngle] = el;
+                  (mainVideoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
+                }}
+                src={url}
+                className="w-full h-full object-cover bg-black"
+                style={{ objectPosition: slotAlign }}
+                muted={false}
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleLoadedMetadata}
+                onEnded={handleVideoEnded}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onClick={togglePlay}
+              />
+              {renderPlayOverlay()}
+            </>
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center text-gray-600 text-xs">
+              {ANGLE_LABELS[camAngle] || camAngle}
+            </div>
+          )}
+          {showHudInCamTelemetry && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
+              <TelemetryCard
+                seiData={seiData}
+                isLoading={isLoading}
+                error={error}
+                speedUnit={speedUnit}
+                onSpeedUnitToggle={() => setSpeedUnit((prev) => (prev === 'mph' ? 'kmh' : 'mph'))}
+                displayConfig={telemetryDisplayConfig}
+              />
+            </div>
+          )}
+          {showDateTime && (
+            <div className={`absolute left-1/2 -translate-x-1/2 z-20 pointer-events-none ${
+              showHudInCamTelemetry
+                ? [1, 2, 3].includes(seiData?.autopilot_state ?? 0) ? 'top-[105px]' : 'top-[95px]'
+                : 'top-3'
+            }`}>
+              <div className="px-2 py-1 rounded-md bg-black/50 backdrop-blur-sm text-white/90 text-xs font-medium">
+                {(() => {
+                  const realTime = new Date(currentMoment.timestamp.getTime() + localTime * 1000);
+                  const date = realTime.toISOString().split('T')[0];
+                  const time = realTime.toTimeString().split(' ')[0];
+                  return <>{date} &nbsp; {time}</>;
+                })()}
+              </div>
+            </div>
+          )}
+          {!isPortraitFormat && (
+            <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm rounded px-2 py-1 text-xs font-medium flex items-center gap-1 z-20 pointer-events-none">
+              {ANGLE_ICONS[camAngle]} {ANGLE_LABELS[camAngle]}
+            </div>
+          )}
+          {isPortraitFormat && (
+            <PortraitCameraSelector
+              currentAngle={camAngle}
+              availableAngles={availableAngles}
+              assignedAngles={portraitCameraConfig[CAM_TELEMETRY_LAYOUT] || ['front']}
+              onChange={(newAngle) => handlePortraitSlotChange(0, newAngle)}
+              currentAlign={slotAlign}
+              onAlignChange={(align) => handlePortraitAlignChange(0, align)}
+            />
+          )}
+        </div>
+
+        <div
+          role="separator"
+          aria-label="Resize camera and telemetry panels"
+          aria-orientation="horizontal"
+          className={`relative z-40 flex items-center justify-center bg-gray-700 hover:bg-blue-500 transition-colors touch-none ${
+            isResizingCamTelemetry ? 'bg-blue-500 cursor-row-resize' : 'cursor-row-resize'
+          }`}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsResizingCamTelemetry(true);
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          }}
+        >
+          <div className="w-12 h-1 rounded-full bg-gray-400" />
+        </div>
+
+        <div className="relative min-h-0 overflow-hidden bg-black">
+          {showTelemetry ? (
+            renderTelemetryDashboard({ compact: true, showHud: false, fillGraphHeight: true })
+          ) : (
+            <span className="text-gray-600 text-xs flex items-center justify-center h-full">Telemetry</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Render video grid based on layout
   const renderVideoGrid = () => {
+    if (isCamTelemetryLayoutActive) {
+      return renderCamTelemetrySplit();
+    }
+
     // Portrait social format — use portrait layout system
     if (format !== 'original' && isPortraitFormat) {
       const layoutMeta = getPortraitLayout(portraitLayout);
@@ -833,19 +1013,6 @@ export function VideoPlayer({
               style={{ flex: layoutMeta.rowWeights[rowIdx] }}
             >
               {row.map((slotIdx, colIdx) => {
-                // Telemetry dashboard slot
-                if (slotIdx === TELEMETRY_SLOT) {
-                  return (
-                    <div key={colIdx} className="relative flex-1 bg-black overflow-hidden isolate z-10">
-                      {showTelemetry ? (
-                        renderTelemetryDashboard({ compact: true, showHud: false, fillGraphHeight: true })
-                      ) : (
-                        <span className="text-gray-600 text-xs flex items-center justify-center h-full">Telemetry</span>
-                      )}
-                    </div>
-                  );
-                }
-
                 // Map slot
                 if (slotIdx === MAP_SLOT) {
                   return (
@@ -1136,7 +1303,7 @@ export function VideoPlayer({
             )}
 
             {/* Date/Time Overlay - Below Telemetry or Top Center */}
-            {showDateTime && (
+            {showDateTime && !isCamTelemetryLayoutActive && (
               <div className={`absolute left-1/2 -translate-x-1/2 pointer-events-none ${
                 showHudOverlayTop
                   ? [1, 2, 3].includes(seiData?.autopilot_state ?? 0) ? 'top-[105px]' : 'top-[95px]'
@@ -1389,6 +1556,19 @@ export function VideoPlayer({
           {/* Unified Layout section — swaps content based on format */}
           <div className="flex items-center gap-1 relative">
             <span className="text-[10px] text-gray-500 mr-1">Layout:</span>
+            <Tooltip content="Cam + Telemetry" position="top">
+              <button
+                onClick={() => handlePortraitLayoutChange(CAM_TELEMETRY_LAYOUT)}
+                className={`px-2 py-1 rounded text-xs font-medium transition-all flex items-center gap-1 ${
+                  isCamTelemetryLayoutActive
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                }`}
+              >
+                <IconChartLine size={14} />
+                <span className="hidden sm:inline">Cam + Telemetry</span>
+              </button>
+            </Tooltip>
             {isPortraitFormat ? (
               <>
                 {/* Portrait: current layout button + gear opens modal */}
@@ -1631,6 +1811,7 @@ export function VideoPlayer({
               portraitAlignConfig={portraitAlignConfig}
               telemetryDisplayConfig={telemetryDisplayConfig}
               telemetryMode={telemetryMode}
+              camTelemetryRatio={camTelemetryRatio}
             />
 
             {/* Divider */}

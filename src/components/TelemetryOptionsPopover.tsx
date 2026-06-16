@@ -136,7 +136,7 @@ export function TelemetryOptionsPopover({
         </div>
         {hasTelemetrySlot && (
           <p className="text-[10px] text-purple-400 mt-2">
-            Layout includes a telemetry slot — dashboard renders in-frame.
+            Cam + Telemetry layout active — drag the divider to resize panels.
           </p>
         )}
       </div>
