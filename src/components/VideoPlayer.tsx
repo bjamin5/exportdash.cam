@@ -1072,6 +1072,8 @@ export function VideoPlayer({
           fps={fps}
           duration={totalDuration}
           currentTime={absoluteTime}
+          isPlaying={isPlaying}
+          playbackRate={playbackRate}
           speedUnit={speedUnit}
           onSeek={handleTimelineSeek}
           onDraggingChange={setIsTimelineDragging}
