@@ -45,6 +45,7 @@ import { VideoExporter } from './VideoExporter';
 import { LayoutConfigPopover } from './LayoutConfigPopover';
 import { PortraitCameraSelector } from './PortraitCameraSelector';
 import { TelemetryTimeline } from './TelemetryTimeline';
+import { TelemetryGraphs } from './TelemetryGraphs';
 import { Tooltip } from './Tooltip';
 
 // Lazy load MapView to avoid SSR issues with Leaflet
@@ -1063,6 +1064,21 @@ export function VideoPlayer({
           </div>
         </div>
       </div>
+
+      {/* Telemetry Graphs - camCut-style accel / lateral / speed charts */}
+      {showTelemetry && totalDuration > 0 && (
+        <TelemetryGraphs
+          allSeiMessages={allSeiMessages}
+          fps={fps}
+          duration={totalDuration}
+          currentTime={absoluteTime}
+          speedUnit={speedUnit}
+          onSeek={handleTimelineSeek}
+          onDraggingChange={setIsTimelineDragging}
+          trimPoints={trimPoints}
+          isTrimming={isTrimming}
+        />
+      )}
 
       {/* Controls Area - Scrollable if needed */}
       <div className={`flex-1 overflow-y-auto space-y-2 min-h-0 ${isFullscreen ? '' : ''}`}>
